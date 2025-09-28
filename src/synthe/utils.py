@@ -114,7 +114,7 @@ def energy_distance(y_true, y_synthetic):
 
 def crps(y_true, y_synthetic):
     """Compute CRPS using properscoring package"""
-    return ps.crps_ensemble(y_true, y_synthetic).median()
+    return np.median(ps.crps_ensemble(y_true, y_synthetic))
 
 
 def simulate_distribution(data, method="bootstrap", 
