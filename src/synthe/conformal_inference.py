@@ -1,6 +1,9 @@
 
 import nnetsauce as ns
 import numpy as np
+import GPopt as gp
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import Matern, RBF, ConstantKernel as C
 
 from collections import namedtuple
 from scipy.spatial.distance import cdist
@@ -9,9 +12,12 @@ from sklearn.model_selection import train_test_split
 from sklearn.ensemble import ExtraTreesRegressor
 from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import KernelDensity
+from sklearn.mixture import GMM
 from sklearn.model_selection import GridSearchCV
 from tqdm import tqdm
-from .utils import simulate_replications
+from .empirical_copula import EmpiricalCopula
+from .row_subsampling import SubSampler
+from .utils import simulate_replications, mmd_rbf, mmd_matern52, energy_distance, crps, simulate_distribution
 
 
 class ConformalInference:
@@ -36,6 +42,14 @@ class ConformalInference:
             Kernel to be used in local conformal inference (default is 'gaussian')
             if type_pi is 'kde', this kernel will also be used in the simulation of residuals
         
+        objective: a string;
+            Objective function to be used in the optimization of the synthetic data generator
+            (default is 'mmd_rbf'). Options are:
+                - 'mmd_rbf': Maximum Mean Discrepancy with RBF kernel
+                - 'mmd_matern52': Maximum Mean Discrepancy with Matérn 5/2 kernel
+                - 'crps': Continuous Ranked Probability Score
+                - 'energy': Energy Distance
+        
         split_ratio: a float;
             Ratio of calibration data (default is 0.5)
 
@@ -49,20 +63,33 @@ class ConformalInference:
         type_split="random",
         replications=250,
         kernel="gaussian",  
+        objective='mmd_rbf',
         split_ratio=0.5,     
+        partition=False,
         seed=123,
     ):
-
         self.type_pi = type_pi
         self.type_split = type_split
         self.replications = replications
         self.kernel = kernel
+        self.objective = objective
         self.split_ratio = split_ratio
+        self.partition = partition
         self.seed = seed
         self.calibrated_residuals_ = None
         self.scaled_calibrated_residuals_ = None
         self.calibrated_residuals_scaler_ = None
+        self.random_covariates_ = None 
+        self.random_covariates_train_ = None 
+        self.random_covariates_calibration_ = None 
         self.kde_ = None
+        self.res_opt_ = None
+        self.copula = None
+        self.obj = ns.Ridge2Regressor(n_hidden_features=5,
+        dropout=0,
+        n_clusters=2,
+        lambda1=0.1,
+        lambda2=0.1,)
 
     def fit(self, X, **kwargs):
         """Fit the `method` to training data (X, y).
@@ -76,69 +103,115 @@ class ConformalInference:
 
         """
 
-        np.random.seed(self.seed)
-
         if self.type_split == "random":
 
-            if len(X.shape) == 1: # 1d array                
-                X_train, X_calibration = ns.SubSampler(y=X, 
-                                                       row_sample=self.split_ratio, 
-                                                       seed=self.seed, 
-                                                       n_jobs=None)                
-                random_covariate = np.random.randn(len(X)).reshape(-1, 1)                            
+            if len(X.shape) == 1: # 1d array   
+
+                if self.partition == False:             
+                    sub_train = SubSampler(y=X, 
+                                    row_sample=self.split_ratio, 
+                                    seed=self.seed, 
+                                    n_jobs=None)                
+                    sub_calib = SubSampler(y=X, 
+                                    row_sample=self.split_ratio, 
+                                    seed=self.seed+1000, 
+                                    n_jobs=None)      
+                    train_idx = sub_train.subsample()
+                    calib_idx = sub_calib.subsample()
+                    X_train = X[train_idx]
+                    X_calibration = X[calib_idx]          
+                else: 
+                    X_ = X.reshape(-1, 1)
+                    gmm = GMM(n_components=2, random_state=self.seed).fit(X_)
+                    labels = gmm.predict(X_)
+                    X_train, X_calibration, _, _ = train_test_split(
+                        X_, labels, test_size=self.split_ratio, 
+                        random_state=self.seed,
+                        stratify=labels)
+                    
             else: # multi-dim array
-                X_train, X_calibration, _, _ = train_test_split(
-                    X, np.random.randn(X.shape[0], 1), test_size=0.5, 
-                    random_state=self.seed
-                )
-                random_covariate = np.random.randn(X.shape[0], 1)                        
-                
+
+                if self.partition == False:             
+                    gmm = GMM(n_components=2, random_state=self.seed).fit(X)
+                    labels = gmm.predict(X)
+                    sub_train = SubSampler(y=labels, 
+                                    row_sample=self.split_ratio, 
+                                    seed=self.seed, 
+                                    n_jobs=None)                
+                    sub_calib = SubSampler(y=labels, 
+                                    row_sample=self.split_ratio, 
+                                    seed=self.seed+1000, 
+                                    n_jobs=None)      
+                    train_idx = sub_train.subsample()
+                    calib_idx = sub_calib.subsample()
+                    X_train = X[train_idx]
+                    X_calibration = X[calib_idx]
+                else: 
+                    gmm = GMM(n_components=2, random_state=self.seed).fit(X)
+                    labels = gmm.predict(X)
+                    X_train, X_calibration, _, _ = train_test_split(
+                        X, labels, test_size=self.split_ratio, 
+                        random_state=self.seed,
+                        stratify=labels)
+                                  
         elif self.type_split == "sequential":
-            
-            if len(X.shape) == 1: # 1d array
-                n_x = len(X)
-                random_covariate = np.random.randn(len(X)).reshape(-1, 1)
-            else: # multi-dim array
-                n_x = X.shape[0]
-                random_covariate = np.random.randn(X.shape[0], 1)                        
 
-            n_x_half = n_x // 2
-            first_half_idx = range(0, n_x_half)
-            second_half_idx = range(n_x_half, n_x)
-            X_train = X[first_half_idx]
-            X_calibration = X[second_half_idx]
+            raise NotImplementedError(
+                "'sequential' split not implemented yet for 1d arrays"
+            )            
         
-        random_covariate_train = random_covariate[X_train.index]
-        random_covariate_calibration = random_covariate[X_calibration.index]
+        np.random.seed(self.seed)
+        self.random_covariates_ = np.random.randn(X.shape[0], 2)                                        
+        self.random_covariates_train_ = self.random_covariates_[:X_train.shape[0],:]
+        self.random_covariates_calibration_ = self.random_covariates_[X_train.shape[0]:,:]
+        self.calibrated_residuals_ = None        
+        self.synthetic_data_ = None
 
-        self.obj.fit(random_covariate, X_train)
-        preds_calibration = self.obj.predict(X_calibration)
-        self.calibrated_residuals_ = y_calibration - preds_calibration
-        absolute_residuals = np.abs(self.calibrated_residuals_)
-        self.calibrated_residuals_scaler_ = StandardScaler(
-            with_mean=True, with_std=True
-        )
-        self.scaled_calibrated_residuals_ = (
-            self.calibrated_residuals_scaler_.fit_transform(
-                self.calibrated_residuals_.reshape(-1, 1)
-            ).ravel()
-        )
-        try:
-            # numpy version >= 1.22
-            self.quantile_ = np.quantile(
-                a=absolute_residuals, q=self.level / 100, method="higher"
-            )
-        except Exception:
-            # numpy version < 1.22
-            self.quantile_ = np.quantile(
-                a=absolute_residuals,
-                q=self.level / 100,
-                interpolation="higher",
-            )
+        def calibrate():
+            """Calibrate the model on calibration data."""
 
-        preds = self.obj.predict(X_calibration)
+            def objective_func(xx):
+                self.obj = ns.Ridge2Regressor(n_hidden_features=int(xx[0]),
+                                              lambda1=10**xx[1],
+                                              lambda2=10**xx[2],
+                                              dropout=max(min(xx[2], 1), 0.5),
+                                              n_clusters=int(xx[3]))            
+                self.obj.fit(self.random_covariates_train_, X_train)
+                preds_calibration = self.obj.predict(self.random_covariates_calibration_)                
+                self.calibrated_residuals_ = X_calibration - preds_calibration                
+                if len(X.shape) == 1:
+                    self.calibrated_residuals_sims_ = simulate_replications(
+                        self.calibrated_residuals_, 
+                        method=self.type_pi,
+                        kernel=self.kernel,
+                        num_samples=1000,
+                        seed=self.seed)
+                    synthetic_data = self.calibrated_residuals_sims_ + preds_calibration[:, np.newaxis]
+                else:
+                    self.copula = EmpiricalCopula()
+                    self.copula.fit(self.calibrated_residuals_)
+                    synthetic_data = self.copula.sample(n_samples=1000) + preds_calibration[:, np.newaxis]
+                return self._compute_objective(X_calibration, synthetic_data)
 
-        return self
+            gp_opt = gp.GPOpt(objective_func=objective_func,
+                        lower_bound = np.array([   3, -4, -4,   0, 0]),
+                        upper_bound = np.array([ 250,  5,  5, 0.5, 5]),
+                        params_names=["n_hidden_features", "log10_lambda1", "log10_lambda2", "dropout", "n_clusters"],
+                        gp_obj = GaussianProcessRegressor( # this is where the Gaussian Process can be chosen
+                            kernel=Matern(nu=2.5),
+                            alpha=1e-6,
+                            normalize_y=True,
+                            n_restarts_optimizer=25,
+                            random_state=42,
+                        ),
+                        n_init=10, n_iter=190, seed=3137)
+            self.res_opt_ = gp_opt.optimize(verbose=2)
+            return 
+        
+        calibrate()
+
+        return self       
+
 
     def sample(self, n_samples=100):
         """Obtain predictions and prediction intervals
@@ -147,142 +220,18 @@ class ConformalInference:
 
             n_samples: an integer;
                 Number of samples to be generated
-
-        """
-                
-        if self.type_pi is None:
-            preds = self.obj.predict(np.random.randn(n_samples, 1))
-            lower_bounds = preds - self.quantile_
-            upper_bounds = preds + self.quantile_
-            return namedtuple(
-                "ConformalPrediction",
-                ["predictions", "lower_bounds", "upper_bounds"],
-            )(preds, lower_bounds, upper_bounds)
-
-        elif self.type_pi in ["bootstrap", "kde"]:
-            simulated_residuals = simulate_replications(
-                data=self.scaled_calibrated_residuals_,
-                method=self.type_pi,
-                num_replications=self.replications,
-                n_obs=n_samples,
-                kernel=self.kernel,
-            )
-            simulated_residuals = simulated_residuals * np.std(
-                self.calibrated_residuals_
-            ) + np.mean(self.calibrated_residuals_)
-            preds = self.obj.predict(np.random.randn(n_samples, 1))
-            lower_bounds = preds - np.quantile(
-                np.abs(simulated_residuals), q=self.level / 100, method="higher"
-            )
-            upper_bounds = preds + np.quantile(
-                np.abs(simulated_residuals), q=self.level / 100, method="higher"
-            )
-            return namedtuple(
-                "ConformalPrediction",
-                ["predictions", "lower_bounds", "upper_bounds"],
-            )(preds, lower_bounds, upper_bounds)
-        else:
-            raise ValueError(
-                f"Unknown type_pi '{self.type_pi}'. Choose from None, 'bootstrap', or 'kde'."
-            )
-
-
-        """MMD with RBF kernel"""
-        X = np.asarray(X, dtype=np.float64)
-        Y = np.asarray(Y, dtype=np.float64)
+        """                
+        return None 
         
-        if X.ndim == 1:
-            X = X.reshape(-1, 1)
-        if Y.ndim == 1:
-            Y = Y.reshape(-1, 1)
-        
-        if bandwidth is None:
-            # Median heuristic
-            XX_dists = cdist(X, X, 'sqeuclidean')
-            bandwidth = np.median(XX_dists[XX_dists > 0]) / 2
-            if bandwidth == 0:
-                bandwidth = 1.0
-        
-        def rbf_kernel(a, b, sigma):
-            return np.exp(-cdist(a, b, 'sqeuclidean') / (2 * sigma**2))
-        
-        K_XX = rbf_kernel(X, X, bandwidth)
-        K_YY = rbf_kernel(Y, Y, bandwidth)
-        K_XY = rbf_kernel(X, Y, bandwidth)
-        
-        n, m = len(X), len(Y)
-        mmd_sq = (np.sum(K_XX) - np.trace(K_XX)) / (n * (n - 1)) + \
-                 (np.sum(K_YY) - np.trace(K_YY)) / (m * (m - 1)) - \
-                 2 * np.sum(K_XY) / (n * m)
-        
-        return max(0, np.sqrt(mmd_sq))
-
-    def _mmd_rbf(self, X, Y, bandwidth=None):
-        """MMD with RBF kernel (vectorized version)"""
-        X = np.asarray(X, dtype=np.float64)
-        Y = np.asarray(Y, dtype=np.float64)
-        
-        if X.ndim == 1:
-            X = X.reshape(-1, 1)
-        if Y.ndim == 1:
-            Y = Y.reshape(-1, 1)
-        
-        n, m = len(X), len(Y)
-        
-        # Compute pairwise squared Euclidean distance between points in X and Y
-        XX_dists = np.sum(X**2, axis=1)[:, None] + np.sum(X**2, axis=1) - 2 * np.dot(X, X.T)
-        YY_dists = np.sum(Y**2, axis=1)[:, None] + np.sum(Y**2, axis=1) - 2 * np.dot(Y, Y.T)
-        XY_dists = np.sum(X**2, axis=1)[:, None] + np.sum(Y**2, axis=1) - 2 * np.dot(X, Y.T)
-        
-        if bandwidth is None:
-            # Median heuristic for bandwidth
-            bandwidth = np.median(XX_dists[XX_dists > 0]) / 2
-            if bandwidth == 0:
-                bandwidth = 1.0
-        
-        # Compute the kernel matrices using broadcasting
-        K_XX = np.exp(-XX_dists / (2 * bandwidth**2))
-        K_YY = np.exp(-YY_dists / (2 * bandwidth**2))
-        K_XY = np.exp(-XY_dists / (2 * bandwidth**2))
-        
-        # MMD computation
-        mmd_sq = (np.sum(K_XX) - np.trace(K_XX)) / (n * (n - 1)) + \
-                (np.sum(K_YY) - np.trace(K_YY)) / (m * (m - 1)) - \
-                2 * np.sum(K_XY) / (n * m)
-        
-        return max(0, np.sqrt(mmd_sq))
-
-    def _energy_distance(self, X, Y):
-        """Energy distance (vectorized version)"""
-        X = np.asarray(X, dtype=np.float64)
-        Y = np.asarray(Y, dtype=np.float64)
-        
-        if X.ndim == 1:
-            X = X.reshape(-1, 1)
-        if Y.ndim == 1:
-            Y = Y.reshape(-1, 1)
-        
-        n, m = len(X), len(Y)
-        if n < 2 or m < 2:
-            return np.inf
-        
-        # Compute pairwise squared Euclidean distances
-        XX_dists = np.sum(X**2, axis=1)[:, None] + np.sum(X**2, axis=1) - 2 * np.dot(X, X.T)
-        YY_dists = np.sum(Y**2, axis=1)[:, None] + np.sum(Y**2, axis=1) - 2 * np.dot(Y, Y.T)
-        XY_dists = np.sum(X**2, axis=1)[:, None] + np.sum(Y**2, axis=1) - 2 * np.dot(X, Y.T)
-        
-        # Compute the Energy Distance
-        XX = np.sum(XX_dists) / (n * (n - 1))
-        YY = np.sum(YY_dists) / (m * (m - 1))
-        XY = np.sum(XY_dists) / (n * m)
-        
-        return max(0.0, 2 * XY - XX - YY)
-    
     def _compute_objective(self, y_true, y_synthetic):
         """Compute chosen objective"""
-        if self.objective == 'mmd':
-            return self._mmd_rbf(y_true, y_synthetic, self.kernel_bandwidth)
+        if self.objective == 'mmd_rbf':
+            return mmd_rbf(y_true, y_synthetic)
+        elif self.objective == 'mmd_matern52':
+            return mmd_matern52(y_true, y_synthetic)
+        elif self.objective == 'crps':
+            return crps(y_true, y_synthetic)
         elif self.objective == 'energy':
-            return self._energy_distance(y_true, y_synthetic)
-        else:
-            return self._mmd_rbf(y_true, y_synthetic, self.kernel_bandwidth)
+            return energy_distance(y_true, y_synthetic)
+        else: # default
+            return mmd_rbf(y_true, y_synthetic)

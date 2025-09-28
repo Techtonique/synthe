@@ -1,8 +1,120 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import properscoring as ps
+
 from scipy.stats import gaussian_kde, norm
 from scipy.interpolate import interp1d
+
+
+def mmd_rbf(y_true, y_synthetic, bandwidth=None):
+    """MMD with RBF kernel (vectorized version)"""
+    X, Y = np.asarray(y_true), np.asarray(y_synthetic)
+    X = np.asarray(X, dtype=np.float64)
+    Y = np.asarray(Y, dtype=np.float64)        
+    if X.ndim == 1:
+        X = X.reshape(-1, 1)
+    if Y.ndim == 1:
+        Y = Y.reshape(-1, 1)        
+    n, m = len(X), len(Y)        
+    # Compute pairwise squared Euclidean distance between points in X and Y
+    XX_dists = np.sum(X**2, axis=1)[:, None] + np.sum(X**2, axis=1) - 2 * np.dot(X, X.T)
+    YY_dists = np.sum(Y**2, axis=1)[:, None] + np.sum(Y**2, axis=1) - 2 * np.dot(Y, Y.T)
+    XY_dists = np.sum(X**2, axis=1)[:, None] + np.sum(Y**2, axis=1) - 2 * np.dot(X, Y.T)        
+    if bandwidth is None:
+        # Median heuristic for bandwidth
+        bandwidth = np.median(XX_dists[XX_dists > 0]) / 2
+        if bandwidth == 0:
+            bandwidth = 1.0        
+    # Compute the kernel matrices using broadcasting
+    K_XX = np.exp(-XX_dists / (2 * bandwidth**2))
+    K_YY = np.exp(-YY_dists / (2 * bandwidth**2))
+    K_XY = np.exp(-XY_dists / (2 * bandwidth**2))        
+    # MMD computation
+    mmd_sq = (np.sum(K_XX) - np.trace(K_XX)) / (n * (n - 1)) + \
+            (np.sum(K_YY) - np.trace(K_YY)) / (m * (m - 1)) - \
+            2 * np.sum(K_XY) / (n * m)        
+    return max(0, np.sqrt(mmd_sq))
+
+
+def mmd_matern52(y_true, y_synthetic, bandwidth=None):
+    """MMD with Matérn 5/2 kernel (vectorized version)"""
+    X, Y = np.asarray(y_true), np.asarray(y_synthetic)
+    X = np.asarray(X, dtype=np.float64)
+    Y = np.asarray(Y, dtype=np.float64)
+    if X.ndim == 1:
+        X = X.reshape(-1, 1)
+    if Y.ndim == 1:
+        Y = Y.reshape(-1, 1)
+    n, m = len(X), len(Y)
+
+    if n < 2 or m < 2:
+        raise ValueError("MMD requires at least 2 samples in each dataset.")
+    # Compute squared Euclidean distances
+    X_sq = np.sum(X**2, axis=1)
+    Y_sq = np.sum(Y**2, axis=1)
+
+    XX_dists = X_sq[:, None] + X_sq - 2 * np.dot(X, X.T)
+    YY_dists = Y_sq[:, None] + Y_sq - 2 * np.dot(Y, Y.T)
+    XY_dists = X_sq[:, None] + Y_sq - 2 * np.dot(X, Y.T)
+    # Ensure non-negative (numerical stability)
+    XX_dists = np.clip(XX_dists, 0, None)
+    YY_dists = np.clip(YY_dists, 0, None)
+    XY_dists = np.clip(XY_dists, 0, None)
+    # Bandwidth selection (median heuristic on Euclidean distances)
+    if bandwidth is None:
+        sqrt_XX = np.sqrt(XX_dists)
+        # Use upper triangle (excluding diagonal) to get unique pairwise distances
+        iu = np.triu_indices(n, k=1)
+        if len(iu[0]) == 0:
+            bandwidth = 1.0
+        else:
+            non_zero_dists = sqrt_XX[iu]
+            bandwidth = np.median(non_zero_dists)
+            if bandwidth == 0:
+                bandwidth = 1.0
+    # Precompute sqrt distances
+    sqrt_d_XX = np.sqrt(XX_dists)
+    sqrt_d_YY = np.sqrt(YY_dists)
+    sqrt_d_XY = np.sqrt(XY_dists)
+    # Matérn 5/2 kernel: k(d) = exp(-√5 d / ℓ) * (1 + √5 d / ℓ + 5 d² / (3 ℓ²))
+    sqrt_5 = np.sqrt(5)        
+    K_XX = np.exp(-sqrt_5 * sqrt_d_XX / bandwidth) * (1 + sqrt_5 * sqrt_d_XX / bandwidth + 5 * XX_dists / (3 * bandwidth**2))
+    K_YY = np.exp(-sqrt_5 * sqrt_d_YY / bandwidth) * (1 + sqrt_5 * sqrt_d_YY / bandwidth + 5 * YY_dists / (3 * bandwidth**2))
+    K_XY = np.exp(-sqrt_5 * sqrt_d_XY / bandwidth) * (1 + sqrt_5 * sqrt_d_XY / bandwidth + 5 * XY_dists / (3 * bandwidth**2))
+    # MMD computation
+    mmd_sq = (np.sum(K_XX) - np.trace(K_XX)) / (n * (n - 1)) + \
+            (np.sum(K_YY) - np.trace(K_YY)) / (m * (m - 1)) - \
+            2 * np.sum(K_XY) / (n * m)        
+    return max(0, np.sqrt(mmd_sq))
+
+
+def energy_distance(y_true, y_synthetic):
+    """Energy distance (vectorized version)"""
+    X, Y = y_true, y_synthetic
+    X = np.asarray(X, dtype=np.float64)
+    Y = np.asarray(Y, dtype=np.float64)        
+    if X.ndim == 1:
+        X = X.reshape(-1, 1)
+    if Y.ndim == 1:
+        Y = Y.reshape(-1, 1)        
+    n, m = len(X), len(Y)
+    if n < 2 or m < 2:
+        return np.inf        
+    # Compute pairwise squared Euclidean distances
+    XX_dists = np.sum(X**2, axis=1)[:, None] + np.sum(X**2, axis=1) - 2 * np.dot(X, X.T)
+    YY_dists = np.sum(Y**2, axis=1)[:, None] + np.sum(Y**2, axis=1) - 2 * np.dot(Y, Y.T)
+    XY_dists = np.sum(X**2, axis=1)[:, None] + np.sum(Y**2, axis=1) - 2 * np.dot(X, Y.T)        
+    # Compute the Energy Distance
+    XX = np.sum(XX_dists) / (n * (n - 1))
+    YY = np.sum(YY_dists) / (m * (m - 1))
+    XY = np.sum(XY_dists) / (n * m)        
+    return max(0.0, 2 * XY - XX - YY)
+
+
+def crps(y_true, y_synthetic):
+    """Compute CRPS using properscoring package"""
+    return ps.crps_ensemble(y_true, y_synthetic).median()
 
 
 def simulate_distribution(data, method="bootstrap", 
