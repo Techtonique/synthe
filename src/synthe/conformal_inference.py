@@ -1,6 +1,7 @@
 
 import nnetsauce as ns
 import numpy as np
+import optuna
 import GPopt as gp
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import Matern, RBF, ConstantKernel as C
@@ -50,6 +51,10 @@ class ConformalInference:
                 - 'crps': Continuous Ranked Probability Score
                 - 'energy': Energy Distance
         
+        optimizer: a string;
+            Optimizer to be used in the optimization of the synthetic data generator
+            ('gpopt' or 'optuna', default is 'optuna')
+        
         split_ratio: a float;
             Ratio of calibration data (default is 0.5)
 
@@ -64,6 +69,7 @@ class ConformalInference:
         replications=250,
         kernel="gaussian",  
         objective='crps',
+        optimizer='optuna',
         split_ratio=0.5,     
         partition=False,
         seed=123,
@@ -73,6 +79,7 @@ class ConformalInference:
         self.replications = replications
         self.kernel = kernel
         self.objective = objective
+        self.optimizer = optimizer
         self.split_ratio = split_ratio
         self.partition = partition
         self.seed = seed
@@ -161,6 +168,46 @@ class ConformalInference:
         def calibrate():
             """Calibrate the model on calibration data."""
 
+            # Define the objective function            
+            def objective_func_optuna(trial):
+                # Suggest values for the hyperparameters in the search space using Optuna
+                n_hidden_features = trial.suggest_int("n_hidden_features", 3, 250)
+                log10_lambda1 = trial.suggest_float("log10_lambda1", -4, 5)
+                log10_lambda2 = trial.suggest_float("log10_lambda2", -4, 5)
+                dropout = trial.suggest_float("dropout", 0.0, 0.5)
+                n_clusters = trial.suggest_int("n_clusters", 0, 5)                
+                # Create the Ridge2Regressor model with the suggested hyperparameters
+                obj = ns.Ridge2Regressor(n_hidden_features=n_hidden_features,
+                                        lambda1=10 ** log10_lambda1,
+                                        lambda2=10 ** log10_lambda2,
+                                        dropout=max(min(dropout, 1), 0.5),  # ensure dropout is within bounds
+                                        n_clusters=n_clusters)                
+                # Train the model
+                obj.fit(self.random_covariates_train_, X_train)                
+                # Make predictions on the calibration data
+                preds_calibration = obj.predict(self.random_covariates_calibration_)                
+                # Compute the residuals
+                calibrated_residuals = X_calibration - preds_calibration                
+                # Handle the case for univariate or multivariate residuals
+                if len(X_calibration.shape) == 1:
+                    calibrated_residuals_sims = simulate_replications(
+                        calibrated_residuals, 
+                        method=self.type_pi,
+                        kernel=self.kernel,
+                        num_replications=250,
+                        seed=self.seed
+                    )
+                    synthetic_data = calibrated_residuals_sims + preds_calibration[:, np.newaxis]
+                else:
+                    # For multivariate residuals, use copula sampling
+                    copula = EmpiricalCopula()
+                    copula.fit(calibrated_residuals)
+                    synthetic_data = copula.sample(n_samples=250) + preds_calibration[:, np.newaxis]
+                # Compute the objective loss
+                loss = self._compute_objective(X_calibration, synthetic_data)                
+                # Return the computed loss which Optuna will try to minimize
+                return loss
+
             def objective_func(xx):
                 self.obj = ns.Ridge2Regressor(n_hidden_features=int(xx[0]),
                                               lambda1=10**xx[1],
@@ -184,22 +231,29 @@ class ConformalInference:
                     synthetic_data = self.copula.sample(n_samples=250) + preds_calibration[:, np.newaxis]
                 return self._compute_objective(X_calibration, synthetic_data)
 
-            gp_opt = gp.GPOpt(objective_func=objective_func,
-                        lower_bound = np.array([   3, -4, -4,   0, 0]),
-                        upper_bound = np.array([ 250,  5,  5, 0.5, 5]),
-                        params_names=["n_hidden_features", "log10_lambda1", "log10_lambda2", "dropout", "n_clusters"],
-                        surrogate_obj = GaussianProcessRegressor(
-                            kernel=Matern(nu=2.5),
-                            alpha=1e-6,
-                            normalize_y=True,
-                            n_restarts_optimizer=25,
-                            random_state=42,
-                        ),
-                        n_init=10, n_iter=90, seed=3137,
-                        n_jobs=1,
-                        )
-            self.res_opt_ = gp_opt.optimize(verbose=1)
-            return 
+            if self.optimizer == 'optuna':
+                study = optuna.create_study(direction="minimize", 
+                                            study_name="synthe_conformal_inference")
+                study.optimize(objective_func_optuna, n_trials=100, n_jobs=1, show_progress_bar=True)
+                self.res_opt_ = study.best_trial
+                return self.res_opt_
+            elif self.optimizer == 'gpopt':
+                gp_opt = gp.GPOpt(objective_func=objective_func,
+                            lower_bound = np.array([   3, -4, -4,   0, 0]),
+                            upper_bound = np.array([ 250,  5,  5, 0.5, 5]),
+                            params_names=["n_hidden_features", "log10_lambda1", "log10_lambda2", "dropout", "n_clusters"],
+                            surrogate_obj = GaussianProcessRegressor(
+                                kernel=Matern(nu=2.5),
+                                alpha=1e-6,
+                                normalize_y=True,
+                                n_restarts_optimizer=25,
+                                random_state=42,
+                            ),
+                            n_init=10, n_iter=90, seed=3137,
+                            n_jobs=1,
+                            )
+                self.res_opt_ = gp_opt.optimize(verbose=1)
+                return self.res_opt_
         
         calibrate()
 
