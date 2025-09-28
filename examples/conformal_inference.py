@@ -1,11 +1,10 @@
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 from synthe.conformal_inference import ConformalInference
 
 # Parameters for the mixture
 n_components = 3  # Number of Gaussian components
-n_samples = 1000  # Total number of samples
+n_samples = 500  # Total number of samples
 
 # Define means, standard deviations, and mixing weights for the Gaussians
 means = [0, 5, 10]
@@ -26,19 +25,6 @@ for i in range(n_components):
     component_indices = component_choices == i
     # Sample from the Gaussian distribution for these indices
     samples[component_indices] = np.random.normal(means[i], std_devs[i], component_indices.sum())
-
-# Plot the histogram of the samples
-plt.hist(samples, bins=30, density=True, alpha=0.6, color='g')
-
-# Plot the individual Gaussian components
-x = np.linspace(min(samples), max(samples), 1000)
-for i in range(n_components):
-    plt.plot(x, weights[i] * (1 / (std_devs[i] * np.sqrt(2 * np.pi))) *
-             np.exp(-0.5 * ((x - means[i]) / std_devs[i])**2), label=f'Component {i+1}')
-
-plt.title('Univariate Mixture of Gaussians')
-plt.legend()
-plt.show()
 
 ci = ConformalInference()
 
