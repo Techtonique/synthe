@@ -1,0 +1,81 @@
+[project]
+name = "synthe"
+version = "0.1.0"
+description = "synthetic simulation"
+readme = "README.md"
+authors = [
+  {name = "T. Moudiki", email = "thierry.moudiki@gmail.com"}
+]
+maintainers = [
+  {name = "T. Moudiki", email = "thierry.moudiki@gmail.com"}
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development",
+    "Topic :: Scientific/Engineering"
+]
+license = {file = "LICENSE"}
+dependencies = [
+  "numpy",
+  "matplotlib",
+  "nnetsauce",
+  "GPopt",
+  "tqdm"
+]
+requires-python = ">= 3.10"
+
+[project.optional-dependencies]
+dev = [
+    "black[jupyter]",
+    "build",
+    "Cython>=3.0.10",
+    "pytest",
+    "ruff",
+    "setuptools-scm>=8",
+    "black[jupyter]",
+    "build",
+    "Cython>=3.0.10",
+    "pytest",
+    "ruff",
+    "setuptools-scm>=8",
+    "sphinx",               # ✅ add this
+    "furo",                 # ✅ optional: for dark mode
+]
+
+[project.urls]
+bugs = "https://github.com/Techtonique/synthe/issues"
+changelog = "https://github.com/Techtonique/synthe/blob/master/changelog.md"
+homepage = "https://github.com/Techtonique/synthe"
+
+[project.scripts]
+synthe = "synthe.cli:app"
+
+[tool.ty]
+# All rules are enabled as "error" by default; no need to specify unless overriding.
+# Example override: relax a rule for the entire project (uncomment if needed).
+# rules.TY015 = "warn"  # For invalid-argument-type, warn instead of error.
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # Pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+]
+
+[tool.uv]
+package = true
