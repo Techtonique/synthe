@@ -195,7 +195,9 @@ class ConformalInference:
                             n_restarts_optimizer=25,
                             random_state=42,
                         ),
-                        n_init=10, n_iter=90, seed=3137)
+                        n_init=10, n_iter=90, seed=3137,
+                        n_jobs=1,
+                        )
             self.res_opt_ = gp_opt.optimize(verbose=1)
             return 
         
