@@ -188,7 +188,7 @@ class ConformalInference:
                         lower_bound = np.array([   3, -4, -4,   0, 0]),
                         upper_bound = np.array([ 250,  5,  5, 0.5, 5]),
                         params_names=["n_hidden_features", "log10_lambda1", "log10_lambda2", "dropout", "n_clusters"],
-                        surrogate_obj = GaussianProcessRegressor( # this is where the Gaussian Process can be chosen
+                        surrogate_obj = GaussianProcessRegressor(
                             kernel=Matern(nu=2.5),
                             alpha=1e-6,
                             normalize_y=True,
