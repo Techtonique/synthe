@@ -28,6 +28,7 @@ dependencies = [
   "numpy",
   "matplotlib",
   "nnetsauce",
+  "unifiedbooster",
   "GPopt",
   "tqdm", 
   "properscoring",

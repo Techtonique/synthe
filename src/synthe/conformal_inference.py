@@ -24,6 +24,9 @@ from .utils import simulate_replications, mmd_rbf, mmd_matern52, energy_distance
 class ConformalInference:
     """GAN-like Synthetic data simulation using Conformal Inference.
 
+    This class implements conformal inference for synthetic data generation with automatic
+    input scaling for improved numerical stability and convergence.
+
     Attributes:
 
         type_pi: a string;
@@ -60,6 +63,10 @@ class ConformalInference:
 
         seed: an integer;
             Reproducibility of fit (there's a random split between fitting and calibration data)
+            
+    Notes:
+        Inputs are automatically scaled using StandardScaler for better numerical stability.
+        Generated samples are automatically rescaled back to the original scale.
     """
 
     def __init__(
@@ -92,6 +99,8 @@ class ConformalInference:
         self.kde_ = None
         self.res_opt_ = None
         self.copula = None
+        # Input scaler for standardization
+        self.input_scaler_ = None
         self.obj = ns.Ridge2Regressor(n_hidden_features=5,
         dropout=0,
         n_clusters=2,
@@ -134,12 +143,12 @@ class ConformalInference:
                     labels = gmm.predict(X)
                     sub_train = SubSampler(y=labels, 
                                            n_samples=X_train.shape[0],
-                                           seed=self.seed, 
-                                           n_jobs=None)                
+                                    seed=self.seed, 
+                                    n_jobs=None)                
                     sub_calib = SubSampler(y=labels, 
                                            n_samples=X_calibration.shape[0],
-                                           seed=self.seed+1000, 
-                                           n_jobs=None)                
+                                    seed=self.seed+1000, 
+                                    n_jobs=None)      
                     train_idx = sub_train.subsample()
                     calib_idx = sub_calib.subsample()
                     X_train = X[train_idx]
@@ -157,6 +166,12 @@ class ConformalInference:
             raise NotImplementedError(
                 "'sequential' split not implemented yet for 1d arrays"
             )            
+        
+        # Scale inputs for better numerical stability
+        self.input_scaler_ = StandardScaler()
+        X_scaled = self.input_scaler_.fit_transform(X)
+        X_train_scaled = self.input_scaler_.transform(X_train)
+        X_calibration_scaled = self.input_scaler_.transform(X_calibration)
         
         np.random.seed(self.seed)
         self.random_covariates_ = np.random.randn(X.shape[0], 2)                                        
@@ -180,14 +195,14 @@ class ConformalInference:
                 obj = ns.Ridge2Regressor(n_hidden_features=n_hidden_features,
                                         lambda1=10 ** log10_lambda1,
                                         lambda2=10 ** log10_lambda2,
-                                        dropout=max(min(dropout, 1), 0.5),  # ensure dropout is within bounds
+                                        dropout=max(min(dropout, 0.5), 0),  # ensure dropout is within bounds
                                         n_clusters=n_clusters)                
-                # Train the model
-                obj.fit(self.random_covariates_train_, X_train)                
+                # Train the model on scaled inputs
+                obj.fit(self.random_covariates_train_, X_train_scaled)                
                 # Make predictions on the calibration data
                 preds_calibration = obj.predict(self.random_covariates_calibration_)                
                 # Compute the residuals
-                calibrated_residuals = X_calibration - preds_calibration                
+                calibrated_residuals = X_calibration_scaled - preds_calibration                
                 # Handle the case for univariate or multivariate residuals
                 if len(X_calibration.shape) == 1:
                     calibrated_residuals_sims = simulate_replications(
@@ -203,7 +218,7 @@ class ConformalInference:
                     copula = EmpiricalCopula()
                     copula.fit(calibrated_residuals)
                     synthetic_data = copula.sample(n_samples=250) + preds_calibration[:, np.newaxis]
-                # Compute the objective loss
+                # Compute the objective loss (use original scale for comparison)
                 loss = self._compute_objective(X_calibration, synthetic_data)                
                 # Return the computed loss which Optuna will try to minimize
                 return loss
@@ -212,11 +227,11 @@ class ConformalInference:
                 self.obj = ns.Ridge2Regressor(n_hidden_features=int(xx[0]),
                                               lambda1=10**xx[1],
                                               lambda2=10**xx[2],
-                                              dropout=max(min(xx[2], 1), 0.5),
-                                              n_clusters=int(xx[3]))            
-                self.obj.fit(self.random_covariates_train_, X_train)
+                                              dropout=max(min(xx[3], 0.5), 0),
+                                              n_clusters=int(xx[4]))            
+                self.obj.fit(self.random_covariates_train_, X_train_scaled)
                 preds_calibration = self.obj.predict(self.random_covariates_calibration_)                
-                self.calibrated_residuals_ = X_calibration - preds_calibration                
+                self.calibrated_residuals_ = X_calibration_scaled - preds_calibration                
                 if len(X.shape) == 1:
                     self.calibrated_residuals_sims_ = simulate_replications(
                         self.calibrated_residuals_, 
@@ -238,17 +253,17 @@ class ConformalInference:
                 self.res_opt_ = study.best_trial
                 return self.res_opt_
             elif self.optimizer == 'gpopt':
-                gp_opt = gp.GPOpt(objective_func=objective_func,
-                            lower_bound = np.array([   3, -4, -4,   0, 0]),
-                            upper_bound = np.array([ 250,  5,  5, 0.5, 5]),
-                            params_names=["n_hidden_features", "log10_lambda1", "log10_lambda2", "dropout", "n_clusters"],
+            gp_opt = gp.GPOpt(objective_func=objective_func,
+                        lower_bound = np.array([   3, -4, -4,   0, 0]),
+                        upper_bound = np.array([ 250,  5,  5, 0.5, 5]),
+                        params_names=["n_hidden_features", "log10_lambda1", "log10_lambda2", "dropout", "n_clusters"],
                             surrogate_obj = GaussianProcessRegressor(
-                                kernel=Matern(nu=2.5),
-                                alpha=1e-6,
-                                normalize_y=True,
-                                n_restarts_optimizer=25,
-                                random_state=42,
-                            ),
+                            kernel=Matern(nu=2.5),
+                            alpha=1e-6,
+                            normalize_y=True,
+                            n_restarts_optimizer=25,
+                            random_state=42,
+                        ),
                             n_init=10, n_iter=90, seed=3137,
                             n_jobs=1,
                             )
@@ -261,14 +276,56 @@ class ConformalInference:
 
 
     def sample(self, n_samples=100):
-        """Obtain predictions and prediction intervals
+        """Generate synthetic samples using the fitted model.
 
         Args:
-
             n_samples: an integer;
                 Number of samples to be generated
-        """                
-        return None 
+                
+        Returns:
+            np.ndarray: Generated synthetic samples in original scale
+        """
+        if self.input_scaler_ is None:
+            raise ValueError("Model must be fitted before sampling. Call fit() first.")
+        
+        # Generate random covariates for sampling
+        np.random.seed(self.seed)
+        random_covariates_new = np.random.randn(n_samples, 2)
+        
+        # Generate predictions on scaled space
+        preds_scaled = self.obj.predict(random_covariates_new)
+        
+        # Generate residuals using the fitted residual model
+        if hasattr(self, 'calibrated_residuals_') and self.calibrated_residuals_ is not None:
+            if len(self.calibrated_residuals_.shape) == 1:
+                # Univariate residuals
+                residual_sims = simulate_replications(
+                    self.calibrated_residuals_, 
+                    method=self.type_pi,
+                    kernel=self.kernel,
+                    num_replications=n_samples,
+                    seed=self.seed
+                )
+                synthetic_data_scaled = residual_sims + preds_scaled[:, np.newaxis]
+            else:
+                # Multivariate residuals - use copula
+                if self.copula is not None:
+                    residual_sims = self.copula.sample(n_samples=n_samples)
+                    synthetic_data_scaled = residual_sims + preds_scaled[:, np.newaxis]
+                else:
+                    # Fallback to bootstrap if no copula
+                    n_residuals = len(self.calibrated_residuals_)
+                    indices = np.random.choice(n_residuals, size=n_samples, replace=True)
+                    residual_sims = self.calibrated_residuals_[indices]
+                    synthetic_data_scaled = residual_sims + preds_scaled
+        else:
+            # If no residuals available, just return predictions
+            synthetic_data_scaled = preds_scaled
+        
+        # Rescale back to original scale
+        synthetic_data_original = self.input_scaler_.inverse_transform(synthetic_data_scaled)
+        
+        return synthetic_data_original 
         
     def _compute_objective(self, y_true, y_synthetic):
         """Compute chosen objective"""
