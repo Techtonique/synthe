@@ -12,7 +12,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.ensemble import ExtraTreesRegressor
 from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import KernelDensity
-from sklearn.mixture import GMM
+from sklearn.mixture import GaussianMixture as GMM
 from sklearn.model_selection import GridSearchCV
 from tqdm import tqdm
 from .empirical_copula import EmpiricalCopula
@@ -59,11 +59,11 @@ class ConformalInference:
 
     def __init__(
         self,
-        type_pi=None,
+        type_pi="bootstrap",
         type_split="random",
         replications=250,
         kernel="gaussian",  
-        objective='mmd_rbf',
+        objective='crps',
         split_ratio=0.5,     
         partition=False,
         seed=123,
@@ -108,18 +108,9 @@ class ConformalInference:
             if len(X.shape) == 1: # 1d array   
 
                 if self.partition == False:             
-                    sub_train = SubSampler(y=X, 
-                                    row_sample=self.split_ratio, 
-                                    seed=self.seed, 
-                                    n_jobs=None)                
-                    sub_calib = SubSampler(y=X, 
-                                    row_sample=self.split_ratio, 
-                                    seed=self.seed+1000, 
-                                    n_jobs=None)      
-                    train_idx = sub_train.subsample()
-                    calib_idx = sub_calib.subsample()
-                    X_train = X[train_idx]
-                    X_calibration = X[calib_idx]          
+                    X_train, X_calibration = train_test_split(X, 
+                                                              test_size=self.split_ratio, 
+                                                              random_state=self.seed)          
                 else: 
                     X_ = X.reshape(-1, 1)
                     gmm = GMM(n_components=2, random_state=self.seed).fit(X_)
@@ -135,13 +126,13 @@ class ConformalInference:
                     gmm = GMM(n_components=2, random_state=self.seed).fit(X)
                     labels = gmm.predict(X)
                     sub_train = SubSampler(y=labels, 
-                                    row_sample=self.split_ratio, 
-                                    seed=self.seed, 
-                                    n_jobs=None)                
+                                           n_samples=X_train.shape[0],
+                                           seed=self.seed, 
+                                           n_jobs=None)                
                     sub_calib = SubSampler(y=labels, 
-                                    row_sample=self.split_ratio, 
-                                    seed=self.seed+1000, 
-                                    n_jobs=None)      
+                                           n_samples=X_calibration.shape[0],
+                                           seed=self.seed+1000, 
+                                           n_jobs=None)                
                     train_idx = sub_train.subsample()
                     calib_idx = sub_calib.subsample()
                     X_train = X[train_idx]
@@ -184,7 +175,7 @@ class ConformalInference:
                         self.calibrated_residuals_, 
                         method=self.type_pi,
                         kernel=self.kernel,
-                        num_samples=1000,
+                        num_replications=1000,
                         seed=self.seed)
                     synthetic_data = self.calibrated_residuals_sims_ + preds_calibration[:, np.newaxis]
                 else:
@@ -197,15 +188,15 @@ class ConformalInference:
                         lower_bound = np.array([   3, -4, -4,   0, 0]),
                         upper_bound = np.array([ 250,  5,  5, 0.5, 5]),
                         params_names=["n_hidden_features", "log10_lambda1", "log10_lambda2", "dropout", "n_clusters"],
-                        gp_obj = GaussianProcessRegressor( # this is where the Gaussian Process can be chosen
+                        surrogate_obj = GaussianProcessRegressor( # this is where the Gaussian Process can be chosen
                             kernel=Matern(nu=2.5),
                             alpha=1e-6,
                             normalize_y=True,
                             n_restarts_optimizer=25,
                             random_state=42,
                         ),
-                        n_init=10, n_iter=190, seed=3137)
-            self.res_opt_ = gp_opt.optimize(verbose=2)
+                        n_init=10, n_iter=90, seed=3137)
+            self.res_opt_ = gp_opt.optimize(verbose=1)
             return 
         
         calibrate()
