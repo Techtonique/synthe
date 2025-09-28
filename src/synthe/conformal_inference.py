@@ -3,6 +3,8 @@ import nnetsauce as ns
 import numpy as np
 import optuna
 import GPopt as gp
+import unifiedbooster as ub
+
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import Matern, RBF, ConstantKernel as C
 
@@ -60,6 +62,9 @@ class ConformalInference:
         
         split_ratio: a float;
             Ratio of calibration data (default is 0.5)
+        
+        surrogate_choice: a str;
+            'ridge2' or 'xgboost', 'lightgbm', 'catboost', 'gradientboosting'
 
         seed: an integer;
             Reproducibility of fit (there's a random split between fitting and calibration data)
@@ -78,6 +83,7 @@ class ConformalInference:
         objective='crps',
         optimizer='optuna',
         split_ratio=0.5,     
+        surrogate_choice='ridge2',
         partition=False,
         seed=123,
     ):
@@ -88,6 +94,7 @@ class ConformalInference:
         self.objective = objective
         self.optimizer = optimizer
         self.split_ratio = split_ratio
+        self.surrogate_choice = surrogate_choice
         self.partition = partition
         self.seed = seed
         self.calibrated_residuals_ = None
@@ -183,68 +190,134 @@ class ConformalInference:
         def calibrate():
             """Calibrate the model on calibration data."""
 
-            # Define the objective function            
-            def objective_func_optuna(trial):
-                # Suggest values for the hyperparameters in the search space using Optuna
-                n_hidden_features = trial.suggest_int("n_hidden_features", 3, 250)
-                log10_lambda1 = trial.suggest_float("log10_lambda1", -4, 5)
-                log10_lambda2 = trial.suggest_float("log10_lambda2", -4, 5)
-                dropout = trial.suggest_float("dropout", 0.0, 0.5)
-                n_clusters = trial.suggest_int("n_clusters", 0, 5)                
-                # Create the Ridge2Regressor model with the suggested hyperparameters
-                obj = ns.Ridge2Regressor(n_hidden_features=n_hidden_features,
-                                        lambda1=10 ** log10_lambda1,
-                                        lambda2=10 ** log10_lambda2,
-                                        dropout=max(min(dropout, 0.5), 0),  # ensure dropout is within bounds
-                                        n_clusters=n_clusters)                
-                # Train the model on scaled inputs
-                obj.fit(self.random_covariates_train_, X_train_scaled)                
-                # Make predictions on the calibration data
-                preds_calibration = obj.predict(self.random_covariates_calibration_)                
-                # Compute the residuals
-                calibrated_residuals = X_calibration_scaled - preds_calibration                
-                # Handle the case for univariate or multivariate residuals
-                if len(X_calibration.shape) == 1:
-                    calibrated_residuals_sims = simulate_replications(
-                        calibrated_residuals, 
-                        method=self.type_pi,
-                        kernel=self.kernel,
-                        num_replications=250,
-                        seed=self.seed
-                    )
-                    synthetic_data = calibrated_residuals_sims + preds_calibration[:, np.newaxis]
-                else:
-                    # For multivariate residuals, use copula sampling
-                    copula = EmpiricalCopula()
-                    copula.fit(calibrated_residuals)
-                    synthetic_data = copula.sample(n_samples=250) + preds_calibration[:, np.newaxis]
-                # Compute the objective loss (use original scale for comparison)
-                loss = self._compute_objective(X_calibration, synthetic_data)                
-                # Return the computed loss which Optuna will try to minimize
-                return loss
+            if self.surrogate_choice == 'ridge2':
+                # Define the objective function            
+                def objective_func_optuna(trial):
+                    # Suggest values for the hyperparameters in the search space using Optuna
+                    n_hidden_features = trial.suggest_int("n_hidden_features", 3, 250)
+                    log10_lambda1 = trial.suggest_float("log10_lambda1", -4, 5)
+                    log10_lambda2 = trial.suggest_float("log10_lambda2", -4, 5)
+                    dropout = trial.suggest_float("dropout", 0.0, 0.5)
+                    n_clusters = trial.suggest_int("n_clusters", 0, 5)                
+                    # Create the Ridge2Regressor model with the suggested hyperparameters
+                    obj = ns.Ridge2Regressor(n_hidden_features=n_hidden_features,
+                                            lambda1=10 ** log10_lambda1,
+                                            lambda2=10 ** log10_lambda2,
+                                            dropout=max(min(dropout, 0.5), 0),  # ensure dropout is within bounds
+                                            n_clusters=n_clusters)                
+                    # Train the model on scaled inputs
+                    obj.fit(self.random_covariates_train_, X_train_scaled)                
+                    # Make predictions on the calibration data
+                    preds_calibration = obj.predict(self.random_covariates_calibration_)                
+                    # Compute the residuals
+                    calibrated_residuals = X_calibration_scaled - preds_calibration                
+                    # Handle the case for univariate or multivariate residuals
+                    if len(X_calibration.shape) == 1:
+                        calibrated_residuals_sims = simulate_replications(
+                            calibrated_residuals, 
+                            method=self.type_pi,
+                            kernel=self.kernel,
+                            num_replications=250,
+                            seed=self.seed
+                        )
+                        synthetic_data = calibrated_residuals_sims + preds_calibration[:, np.newaxis]
+                    else:
+                        # For multivariate residuals, use copula sampling
+                        copula = EmpiricalCopula()
+                        copula.fit(calibrated_residuals)
+                        synthetic_data = copula.sample(n_samples=250) + preds_calibration[:, np.newaxis]
+                    # Compute the objective loss (use original scale for comparison)
+                    loss = self._compute_objective(X_calibration, synthetic_data)                
+                    # Return the computed loss which Optuna will try to minimize
+                    return loss
 
-            def objective_func(xx):
-                self.obj = ns.Ridge2Regressor(n_hidden_features=int(xx[0]),
-                                              lambda1=10**xx[1],
-                                              lambda2=10**xx[2],
-                                              dropout=max(min(xx[3], 0.5), 0),
-                                              n_clusters=int(xx[4]))            
-                self.obj.fit(self.random_covariates_train_, X_train_scaled)
-                preds_calibration = self.obj.predict(self.random_covariates_calibration_)                
-                self.calibrated_residuals_ = X_calibration_scaled - preds_calibration                
-                if len(X.shape) == 1:
-                    self.calibrated_residuals_sims_ = simulate_replications(
-                        self.calibrated_residuals_, 
-                        method=self.type_pi,
-                        kernel=self.kernel,
-                        num_replications=250,
-                        seed=self.seed)
-                    synthetic_data = self.calibrated_residuals_sims_ + preds_calibration[:, np.newaxis]
-                else:
-                    self.copula = EmpiricalCopula()
-                    self.copula.fit(self.calibrated_residuals_)
-                    synthetic_data = self.copula.sample(n_samples=250) + preds_calibration[:, np.newaxis]
-                return self._compute_objective(X_calibration, synthetic_data)
+                def objective_func(xx):
+                    self.obj = ns.Ridge2Regressor(n_hidden_features=int(xx[0]),
+                                                lambda1=10**xx[1],
+                                                lambda2=10**xx[2],
+                                                dropout=max(min(xx[3], 0.5), 0),
+                                                n_clusters=int(xx[4]))            
+                    self.obj.fit(self.random_covariates_train_, X_train_scaled)
+                    preds_calibration = self.obj.predict(self.random_covariates_calibration_)                
+                    self.calibrated_residuals_ = X_calibration_scaled - preds_calibration                
+                    if len(X.shape) == 1:
+                        self.calibrated_residuals_sims_ = simulate_replications(
+                            self.calibrated_residuals_, 
+                            method=self.type_pi,
+                            kernel=self.kernel,
+                            num_replications=250,
+                            seed=self.seed)
+                        synthetic_data = self.calibrated_residuals_sims_ + preds_calibration[:, np.newaxis]
+                    else:
+                        self.copula = EmpiricalCopula()
+                        self.copula.fit(self.calibrated_residuals_)
+                        synthetic_data = self.copula.sample(n_samples=250) + preds_calibration[:, np.newaxis]
+                    return self._compute_objective(X_calibration, synthetic_data)
+            elif self.surrogate_choice in ['xgboost', 'lightgbm', 'catboost', 'gradientboosting']:
+                # define the objective function     
+                # learning_rate: float
+                #     shrinkage rate; used for reducing the gradient step
+                # max_depth: int
+                #     maximum tree depth
+                # rowsample: float
+                #     subsample ratio of the training instances
+                # colsample: float
+                #     percentage of features to use at each node split
+                def objective_func_optuna(trial):
+                    learning_rate = trial.suggest_float("learning_rate", 0.01, 0.3)
+                    max_depth = trial.suggest_int("max_depth", 3, 10)
+                    rowsample = trial.suggest_float("rowsample", 0.1, 1.0)
+                    colsample = trial.suggest_float("colsample", 0.1, 1.0)
+                    obj = ub.GBDTRegressor(model_type=self.surrogate_choice,
+                                        learning_rate=learning_rate,
+                                        max_depth=max_depth,
+                                        subsample=rowsample,
+                                        colsample_bytree=colsample,
+                                        n_estimators=250,
+                                        random_state=42)
+                    obj.fit(self.random_covariates_train_, X_train_scaled)
+                    preds_calibration = obj.predict(self.random_covariates_calibration_)                
+                    calibrated_residuals = X_calibration_scaled - preds_calibration                
+                    if len(X.shape) == 1:
+                        calibrated_residuals_sims = simulate_replications(
+                            calibrated_residuals, 
+                            method=self.type_pi,
+                            kernel=self.kernel,
+                            num_replications=250,
+                            seed=self.seed
+                        )
+                        synthetic_data = calibrated_residuals_sims + preds_calibration[:, np.newaxis]
+                    else:
+                        copula = EmpiricalCopula()
+                        copula.fit(calibrated_residuals)
+                        synthetic_data = copula.sample(n_samples=250) + preds_calibration[:, np.newaxis]
+                    loss = self._compute_objective(X_calibration, synthetic_data)                
+                    return loss
+                
+                def objective_func(xx):
+                    self.obj = ub.GBDTRegressor(model_type=self.surrogate_choice,
+                                            learning_rate=xx[0],
+                                            max_depth=int(xx[1]),
+                                            subsample=xx[2],
+                                            colsample_bytree=xx[3],
+                                            n_estimators=250,
+                                            random_state=42)            
+                    self.obj.fit(self.random_covariates_train_, X_train_scaled)
+                    preds_calibration = self.obj.predict(self.random_covariates_calibration_)                
+                    self.calibrated_residuals_ = X_calibration_scaled - preds_calibration                
+                    if len(X.shape) == 1:
+                        self.calibrated_residuals_sims_ = simulate_replications(
+                            self.calibrated_residuals_, 
+                            method=self.type_pi,
+                            kernel=self.kernel,
+                            num_replications=250,
+                            seed=self.seed)
+                        synthetic_data = self.calibrated_residuals_sims_ + preds_calibration[:, np.newaxis]
+                    else:
+                        self.copula = EmpiricalCopula()
+                        self.copula.fit(self.calibrated_residuals_)
+                        synthetic_data = self.copula.sample(n_samples=250) + preds_calibration[:, np.newaxis]
+                    return self._compute_objective(X_calibration, synthetic_data)                                                        
 
             if self.optimizer == 'optuna':
                 study = optuna.create_study(direction="minimize", 
