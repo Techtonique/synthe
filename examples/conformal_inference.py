@@ -28,10 +28,10 @@ for i in range(n_components):
     # Sample from the Gaussian distribution for these indices
     samples[component_indices] = np.random.normal(means[i], std_devs[i], component_indices.sum())
 
-ci = ConformalInference(optimizer='gpopt')
+#ci = ConformalInference(optimizer='gpopt')
 
-ci.fit(samples)
-print(ci.sample(n_samples=100))
+#ci.fit(samples)
+#print(ci.sample(n_samples=100))
 
 ci = ConformalInference(optimizer='optuna')
 

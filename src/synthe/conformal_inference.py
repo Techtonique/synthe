@@ -276,17 +276,17 @@ class ConformalInference:
                                           dropout=max(min(self.res_opt_.best_params['dropout'], 1), 0.5),
                                           n_clusters=int(self.res_opt_.best_params['n_clusters']))
         elif self.optimizer == 'optuna':
-            best_params = self.res_opt_
-            self.obj = ns.Ridge2Regressor(n_hidden_features=int(best_params[0]),
-                                          lambda1=10**best_params[1],
-                                          lambda2=10**best_params[2],
-                                          dropout=max(min(best_params[3], 1), 0.5),
-                                          n_clusters=int(best_params[4]))
+            best_params = self.res_opt_.params
+            self.obj = ns.Ridge2Regressor(
+                n_hidden_features=int(best_params["n_hidden_features"]),
+                lambda1=10 ** best_params["log10_lambda1"],
+                lambda2=10 ** best_params["log10_lambda2"],
+                dropout=max(min(best_params["dropout"], 1), 0.5),
+                n_clusters=int(best_params["n_clusters"])
+            )
         np.random.seed(seed)
         random_covariates_calib = np.random.randn(self.X_calib_.shape[0], 2)
         random_covariates_new = np.random.randn(n_samples, 2)
-        print(self.random_covariates_train_.shape, self.X_train_.shape)
-        print(self.random_covariates_train_.dtype, self.X_train_.dtype)
         self.obj.fit(self.random_covariates_train_, self.X_train_)
         preds_calibration = self.obj.predict(random_covariates_calib)                
         calibrated_residuals = self.X_calib_ - preds_calibration                
