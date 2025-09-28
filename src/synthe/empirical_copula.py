@@ -144,6 +144,43 @@ class EmpiricalCopula:
             return pseudo_samples        
         # Transform back to original scale
         return self._inverse_transform(pseudo_samples)
+    
+    def plot_pairwise_pseudo(self):        
+        if not self.is_fitted_:
+            raise ValueError("Copula must be fitted before plotting.")
+        plt.figure(figsize=(15, 15))
+        for i in range(self.n_vars_):
+            for j in range(i + 1, self.n_vars_):
+                plt.subplot(self.n_vars_ - 1, self.n_vars_ - 1, i * (self.n_vars_ - 1) + j - i)
+                plt.scatter(self.pseudo_observations_[:, i], self.pseudo_observations_[:, j], s=5, alpha=0.5)
+                plt.xlabel(f"Variable {i+1}")
+                plt.ylabel(f"Variable {j+1}")
+                plt.title(f"Var{i+1}-Var{j+1} (ρ={self._calculate_spearman_matrix(self.original_data_)[i,j]:.2f})")
+        plt.tight_layout()
+        plt.show()
+    
+    def estimate_tail_dependence(self, threshold=0.05):
+        tail_dep = {}
+        for i in range(self.n_vars_):
+            for j in range(i + 1, self.n_vars_):
+                u = self.pseudo_observations_[:, i]
+                v = self.pseudo_observations_[:, j]
+                lower_tail = np.mean((u < threshold) & (v < threshold)) / threshold
+                upper_tail = np.mean((u > 1 - threshold) & (v > 1 - threshold)) / threshold
+                tail_dep[f'var{i+1}-var{j+1}'] = {'lower': lower_tail, 'upper': upper_tail}
+        return tail_dep
+
+    def plot_marginals(self, simulated_samples):
+        import matplotlib.pyplot as plt
+        plt.figure(figsize=(15, 5))
+        for j in range(self.n_vars_):
+            plt.subplot(2, self.n_vars_ // 2, j + 1)
+            plt.hist(self.original_data_[:, j], bins=30, alpha=0.5, label='Original', density=True)
+            plt.hist(simulated_samples[:, j], bins=30, alpha=0.5, label='Simulated', density=True)
+            plt.title(f"Variable {j+1}")
+            plt.legend()
+        plt.tight_layout()
+        plt.show()
 
     def validate_fit(self, X_test: Optional[np.ndarray] = None, n_bootstrap: int = 1000,
                      alpha: float = 0.05, verbose: bool = True) -> Dict:
@@ -273,21 +310,17 @@ class EmpiricalCopula:
         
         for i in range(self.n_vars_):
             for j in range(i + 1, self.n_vars_):
-                pair_name = f'var{i+1}_var{j+1}'
-                
+                pair_name = f'var{i+1}_var{j+1}'                
                 # Test correlations using Fisher's z-transform
                 r1, r2 = orig_corr[i, j], sim_corr[i, j]
-                n1, n2 = len(X_test), len(bootstrap_samples)
-                
+                n1, n2 = len(X_test), len(bootstrap_samples)                
                 # Fisher's z-transform
                 z1 = 0.5 * np.log((1 + r1) / (1 - r1)) if abs(r1) < 0.999 else np.sign(r1) * 3
-                z2 = 0.5 * np.log((1 + r2) / (1 - r2)) if abs(r2) < 0.999 else np.sign(r2) * 3
-                
+                z2 = 0.5 * np.log((1 + r2) / (1 - r2)) if abs(r2) < 0.999 else np.sign(r2) * 3                
                 # Test statistic
                 se = np.sqrt(1/(n1-3) + 1/(n2-3))
                 z_stat = (z1 - z2) / se if se > 0 else 0
-                corr_pvalue = 2 * (1 - stats.norm.cdf(abs(z_stat)))
-                
+                corr_pvalue = 2 * (1 - stats.norm.cdf(abs(z_stat)))                
                 # Spearman and Kendall differences
                 spear_diff = abs(orig_spearman[i, j] - sim_spearman[i, j])
                 kendall_diff = abs(orig_kendall[i, j] - sim_kendall[i, j])
@@ -315,8 +348,7 @@ class EmpiricalCopula:
                 print(f"  Pearson: {tests['pearson_original']:.4f} vs {tests['pearson_simulated']:.4f}, "
                       f"p-val={tests['pearson_p_value']:.4f} [{corr_status}]")
                 print(f"  Spearman diff: {tests['spearman_difference']:.4f} [{spear_status}]")
-                print(f"  Kendall diff: {tests['kendall_difference']:.4f} [{kendall_status}]")
-        
+                print(f"  Kendall diff: {tests['kendall_difference']:.4f} [{kendall_status}]")        
         # 3. UNIFORMITY TESTS FOR PSEUDO-OBSERVATIONS
         if verbose:
             print(f"\n3. Uniformity Tests (Pseudo-Observations):")
@@ -371,13 +403,11 @@ class EmpiricalCopula:
         results['uniformity_tests'] = uniformity_results
         
         pseudo_orig = self._to_pseudo_observations(X_test)
-        pseudo_sim = self._to_pseudo_observations(bootstrap_samples)
-                        
+        pseudo_sim = self._to_pseudo_observations(bootstrap_samples)                        
         # 5. SUMMARY ASSESSMENT
         if verbose:
             print(f"\n5. Overall Assessment:")
-            print("-" * 22)
-        
+            print("-" * 22)        
         # Count various test failures
         ks_failures = sum(1 for j in range(self.n_vars_) 
                          if results['marginal_tests'][f'variable_{j+1}']['ks_reject_null'])
@@ -392,8 +422,7 @@ class EmpiricalCopula:
                            if tests['pearson_significant_diff'])
         
         uniform_failures = sum(1 for j in range(self.n_vars_) 
-                              if results['uniformity_tests'][f'variable_{j+1}']['ks_uniform_reject'])
-        
+                              if results['uniformity_tests'][f'variable_{j+1}']['ks_uniform_reject'])        
         # Calculate average differences
         avg_spear_diff = np.mean([tests['spearman_difference'] for tests in dependence_results.values()])
         avg_kendall_diff = np.mean([tests['kendall_difference'] for tests in dependence_results.values()])        

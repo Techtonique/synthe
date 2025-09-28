@@ -16,9 +16,13 @@ print(log_returns.shape)
 methods = ["none", "jitter"]
 
 for method in methods:
-    print(f"\nTesting empirical copula with smoothing method: {method}")
-    copula = EmpiricalCopula(smoothing_method=method, jitter_scale=0.01)
+    print(f"\n\n Testing empirical copula with smoothing method: {method} ======")
+    copula = EmpiricalCopula(smoothing_method=method)
     copula.fit(log_returns.values)
     simulated_data = copula.sample(n_samples=500)
     copula.validate_fit(log_returns.values)
+    copula.plot_pairwise_pseudo()
+    #copula.plot_marginals()
+    copula.estimate_tail_dependence()
+
     
