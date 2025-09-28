@@ -7,6 +7,7 @@ from scipy import stats
 from scipy.interpolate import interp1d, griddata
 from sklearn.neighbors import KernelDensity
 from sklearn.model_selection import GridSearchCV
+from sklearn.mixture import GaussianMixture
 
 
 class EmpiricalCopula:
@@ -54,6 +55,8 @@ class EmpiricalCopula:
         self.marginal_quantiles_ = []        
         # For kernel-based methods
         self.kde_model_ = None
+        # For Gaussian mixture model
+        self.gmm_model_ = None
         
     def fit(self, X: np.ndarray) -> 'EmpiricalCopula':
         """
@@ -99,6 +102,8 @@ class EmpiricalCopula:
     def sample(self, n_samples: int = 50, 
                method: str = "bootstrap", 
                kernel: str = "gaussian",
+               n_components: int = 5,
+               covariance_type: str = "full",
                return_pseudo: bool = False,
                random_state: Optional[int] = 123, 
                **kwargs) -> np.ndarray:
@@ -113,9 +118,15 @@ class EmpiricalCopula:
             Sampling method:
             - "bootstrap": Bootstrap resampling from fitted pseudo-observations
             - "kde": Kernel density estimation sampling (if smoothing was used)
+            - "gmm": Gaussian mixture model sampling
         kernel : str, default "gaussian"
             Kernel to use if method is "kde" (default is 'gaussian').
             Can also be 'tophat'.
+        n_components : int, default 5
+            Number of Gaussian components for GMM method.
+        covariance_type : str, default "full"
+            Type of covariance parameters for GMM method.
+            Options: 'full', 'tied', 'diag', 'spherical'.
         return_pseudo : bool, default False
             If True, return samples on [0,1] copula scale.
             If False, return samples transformed to original scale.
@@ -140,6 +151,14 @@ class EmpiricalCopula:
             pseudo_samples = self._kde_sample(n_samples, 
                                               kernel=kernel, 
                                               **kwargs)
+        elif method == "gmm":
+            pseudo_samples = self._gmm_sample(n_samples, 
+                                              n_components=n_components,
+                                              covariance_type=covariance_type,
+                                              **kwargs)
+        else:
+            raise ValueError(f"Unknown sampling method: {method}. "
+                           f"Supported methods: 'bootstrap', 'kde', 'gmm'")
         if return_pseudo:
             return pseudo_samples        
         # Transform back to original scale
@@ -534,6 +553,48 @@ class EmpiricalCopula:
         self.kde_model_ = grid.best_estimator_
         return self.kde_model_.sample(n_samples)
     
+    def _gmm_sample(self, n_samples: int, n_components: int = 5, 
+                    covariance_type: str = "full", **kwargs) -> np.ndarray:
+        """
+        Generate samples using Gaussian mixture model.
+        
+        Parameters:
+        -----------
+        n_samples : int
+            Number of samples to generate.
+        n_components : int, default 5
+            Number of Gaussian components in the mixture.
+        covariance_type : str, default "full"
+            Type of covariance parameters. Options: 'full', 'tied', 'diag', 'spherical'.
+        **kwargs : additional arguments for GaussianMixture.
+            
+        Returns:
+        --------
+        samples : np.ndarray
+            Generated samples on [0,1] copula scale.
+        """
+        # Fit Gaussian mixture model to pseudo-observations
+        gmm = GaussianMixture(
+            n_components=n_components,
+            covariance_type=covariance_type,
+            random_state=kwargs.get('random_state', None),
+            **{k: v for k, v in kwargs.items() if k != 'random_state'}
+        )
+        
+        # Fit the model
+        gmm.fit(self.pseudo_observations_)
+        
+        # Store the fitted model
+        self.gmm_model_ = gmm
+        
+        # Generate samples
+        samples, _ = gmm.sample(n_samples)
+        
+        # Ensure samples are in [0,1] range (clip if necessary)
+        samples = np.clip(samples, 1e-10, 1 - 1e-10)
+        
+        return samples
+    
     def _inverse_transform(self, pseudo_samples: np.ndarray) -> np.ndarray:
         """Transform pseudo-observations back to original scale."""
         n_samples, n_vars = pseudo_samples.shape
@@ -574,6 +635,21 @@ class EmpiricalCopula:
                     kendall_matrix[i, j], _ = stats.kendalltau(X[:, i], X[:, j])
         
         return kendall_matrix
+    
+    def get_info(self) -> Dict:
+        """Get information about the fitted empirical copula."""
+        if not self.is_fitted_:
+            raise ValueError("Copula must be fitted first.")
+        
+        return {
+            'n_samples': self.n_samples_,
+            'n_vars': self.n_vars_,
+            'smoothing_method': self.smoothing_method,
+            'jitter_scale': self.jitter_scale,
+            'boundary_correction': self.boundary_correction,
+            'has_kde_model': self.kde_model_ is not None,
+            'has_gmm_model': self.gmm_model_ is not None
+        }
     
     def __repr__(self) -> str:
         if self.is_fitted_:
