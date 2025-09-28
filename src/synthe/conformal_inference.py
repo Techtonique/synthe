@@ -37,7 +37,7 @@ class ConformalInference:
             "random" (random split of data) or "sequential" (sequential split of data)
         
         replications: an integer;
-            Number of replications for simulated conformal (default is 250)
+            Number of replications for simulated conformal (default is 500)
         
         kernel: a string;
             Kernel to be used in local conformal inference (default is 'gaussian')
@@ -66,7 +66,7 @@ class ConformalInference:
         self,
         type_pi="bootstrap",
         type_split="random",
-        replications=250,
+        replications=500,
         kernel="gaussian",  
         objective='crps',
         optimizer='optuna',
@@ -195,7 +195,7 @@ class ConformalInference:
                         calibrated_residuals, 
                         method=self.type_pi,
                         kernel=self.kernel,
-                        num_replications=275,
+                        num_replications=500,
                         seed=self.seed
                     )
                     synthetic_data = calibrated_residuals_sims + preds_calibration.ravel()[:, np.newaxis]
@@ -203,9 +203,12 @@ class ConformalInference:
                     # For multivariate residuals, use copula sampling
                     copula = EmpiricalCopula()
                     copula.fit(calibrated_residuals)
-                    synthetic_data = copula.sample(n_samples=250) + preds_calibration[:, np.newaxis]
+                    synthetic_data = copula.sample(n_samples=500) + preds_calibration[:, np.newaxis]
                 # Compute the objective loss
-                loss = self._compute_objective(X_calibration, synthetic_data)                
+                try: 
+                    loss = self._compute_objective(X_calibration, synthetic_data)                
+                except Exception as e:                    
+                    loss = self._compute_objective(X_calibration.ravel(), synthetic_data.ravel())
                 # Return the computed loss which Optuna will try to minimize
                 return loss
 
@@ -223,19 +226,19 @@ class ConformalInference:
                         self.calibrated_residuals_, 
                         method=self.type_pi,
                         kernel=self.kernel,
-                        num_replications=250,
+                        num_replications=500,
                         seed=self.seed)
                     synthetic_data = self.calibrated_residuals_sims_ + preds_calibration[:, np.newaxis]                    
                 else:
                     self.copula = EmpiricalCopula()
                     self.copula.fit(self.calibrated_residuals_)
-                    synthetic_data = self.copula.sample(n_samples=250) + preds_calibration[:, np.newaxis]
+                    synthetic_data = self.copula.sample(n_samples=500) + preds_calibration[:, np.newaxis]
                 return self._compute_objective(X_calibration, synthetic_data)
 
             if self.optimizer == 'optuna':
                 study = optuna.create_study(direction="minimize", 
                                             study_name="synthe_conformal_inference")
-                study.optimize(objective_func_optuna, n_trials=100, n_jobs=1, show_progress_bar=True)
+                study.optimize(objective_func_optuna, n_trials=200, n_jobs=1, show_progress_bar=True)
                 self.res_opt_ = study.best_trial
                 return self.res_opt_
             elif self.optimizer == 'gpopt':
@@ -250,7 +253,7 @@ class ConformalInference:
                                 n_restarts_optimizer=25,
                                 random_state=42,
                             ),
-                            n_init=10, n_iter=90, seed=3137,
+                            n_init=10, n_iter=190, seed=3137,
                             n_jobs=1,
                             )
                 self.res_opt_ = gp_opt.optimize(verbose=2)
@@ -285,10 +288,9 @@ class ConformalInference:
                 n_clusters=int(best_params["n_clusters"])
             )
         np.random.seed(seed)
-        random_covariates_calib = np.random.randn(self.X_calib_.shape[0], 2)
         random_covariates_new = np.random.randn(n_samples, 2)
         self.obj.fit(self.random_covariates_train_, self.X_train_)
-        preds_calibration = self.obj.predict(random_covariates_calib)                
+        preds_calibration = self.obj.predict(self.random_covariates_calibration_)                
         calibrated_residuals = self.X_calib_ - preds_calibration                
         if len(self.X_train_.shape) == 1:
             calibrated_residuals_sims = simulate_replications(
@@ -302,7 +304,42 @@ class ConformalInference:
             copula = EmpiricalCopula()
             copula.fit(calibrated_residuals)
             return self.copula.sample(n_samples=n_samples) + preds_calibration[:, np.newaxis]
-        
+
+    def diagnostics(self, n_samples=500):
+        """
+        Automatically runs diagnostics on the quality of synthetic data.
+        Generates synthetic samples and compares them to the training data
+        using statistical tests (KS test, Energy distance).
+        """
+        synthetic = self.sample(n_samples=n_samples).ravel()
+        from scipy.stats import ks_2samp, energy_distance
+        ks_stat, ks_pvalue = ks_2samp(self.X_train_, synthetic)
+        edist = energy_distance(self.X_train_, synthetic)
+        print(f"KS test: statistic={ks_stat:.4f}, p-value={ks_pvalue:.4g}")
+        print(f"Energy distance: {edist:.4f}")
+            # Anderson-Darling k-sample test
+        try:
+            from scipy.stats import anderson_ksamp
+            ad_result = anderson_ksamp([samples, synthetic])
+            print(f"Anderson-Darling k-sample: statistic={ad_result.statistic:.4f}, p-value={ad_result.pvalue:.4g}")
+        except ImportError:
+            print("Anderson-Darling test not available.")
+
+        # Cramér-von Mises test
+        try:
+            from scipy.stats import cramervonmises_2samp
+            cvm_result = cramervonmises_2samp(samples, synthetic)
+            print(f"Cramér-von Mises: statistic={cvm_result.statistic:.4f}, p-value={cvm_result.pvalue:.4g}")
+        except ImportError:
+            print("Cramér-von Mises test not available.")
+
+        # Mann-Whitney U test
+        try:
+            from scipy.stats import mannwhitneyu
+            mw_stat, mw_pvalue = mannwhitneyu(samples, synthetic, alternative="two-sided")
+            print(f"Mann-Whitney U: statistic={mw_stat:.4f}, p-value={mw_pvalue:.4g}")
+        except ImportError:
+            print("Mann-Whitney U test not available.")
         
     def _compute_objective(self, y_true, y_synthetic):
         """Compute chosen objective"""

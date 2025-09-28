@@ -18,9 +18,15 @@ def mmd_rbf(y_true, y_synthetic, bandwidth=None):
         Y = Y.reshape(-1, 1)        
     n, m = len(X), len(Y)        
     # Compute pairwise squared Euclidean distance between points in X and Y
-    XX_dists = np.sum(X**2, axis=1)[:, None] + np.sum(X**2, axis=1) - 2 * np.dot(X, X.T)
-    YY_dists = np.sum(Y**2, axis=1)[:, None] + np.sum(Y**2, axis=1) - 2 * np.dot(Y, Y.T)
-    XY_dists = np.sum(X**2, axis=1)[:, None] + np.sum(Y**2, axis=1) - 2 * np.dot(X, Y.T)        
+    try: 
+        XX_dists = np.sum(X**2, axis=1)[:, None] + np.sum(X**2, axis=1) - 2 * np.dot(X, X.T)
+        YY_dists = np.sum(Y**2, axis=1)[:, None] + np.sum(Y**2, axis=1) - 2 * np.dot(Y, Y.T)
+        XY_dists = np.sum(X**2, axis=1)[:, None] + np.sum(Y**2, axis=1) - 2 * np.dot(X, Y.T)        
+    except Exception as e:
+        print("Error in distance computation:", e)
+        XX_dists = np.sum(X**2, axis=1)[:, None] + np.sum(X**2, axis=1) - 2 * np.dot(X, X.T)
+        YY_dists = np.sum(Y**2, axis=1)[:, None] + np.sum(Y**2, axis=1) - 2 * np.dot(Y, Y.T)
+        XY_dists = np.sum(X**2, axis=1)[:, None] + np.sum(Y**2, axis=1) - 2 * np.dot(X, Y.T)        
     if bandwidth is None:
         # Median heuristic for bandwidth
         bandwidth = np.median(XX_dists[XX_dists > 0]) / 2
