@@ -175,13 +175,13 @@ class ConformalInference:
                         self.calibrated_residuals_, 
                         method=self.type_pi,
                         kernel=self.kernel,
-                        num_replications=1000,
+                        num_replications=250,
                         seed=self.seed)
                     synthetic_data = self.calibrated_residuals_sims_ + preds_calibration[:, np.newaxis]
                 else:
                     self.copula = EmpiricalCopula()
                     self.copula.fit(self.calibrated_residuals_)
-                    synthetic_data = self.copula.sample(n_samples=1000) + preds_calibration[:, np.newaxis]
+                    synthetic_data = self.copula.sample(n_samples=250) + preds_calibration[:, np.newaxis]
                 return self._compute_objective(X_calibration, synthetic_data)
 
             gp_opt = gp.GPOpt(objective_func=objective_func,

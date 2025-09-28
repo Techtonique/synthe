@@ -118,7 +118,7 @@ def crps(y_true, y_synthetic):
 
 
 def simulate_distribution(data, method="bootstrap", 
-                          num_samples=1000, 
+                          num_samples=250, 
                           seed=123, **kwargs):
     """
     Simulate the distribution of an input vector using various methods.

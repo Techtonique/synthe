@@ -201,7 +201,7 @@ class EmpiricalCopula:
         plt.tight_layout()
         plt.show()
 
-    def validate_fit(self, X_test: Optional[np.ndarray] = None, n_bootstrap: int = 1000,
+    def validate_fit(self, X_test: Optional[np.ndarray] = None, n_bootstrap: int = 250,
                      alpha: float = 0.05, verbose: bool = True) -> Dict:
         """
         Validate the fitted empirical copula using comprehensive hypothesis tests.
