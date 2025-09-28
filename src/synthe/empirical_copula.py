@@ -320,24 +320,20 @@ class EmpiricalCopula:
         # 3. UNIFORMITY TESTS FOR PSEUDO-OBSERVATIONS
         if verbose:
             print(f"\n3. Uniformity Tests (Pseudo-Observations):")
-            print("-" * 42)
-        
+            print("-" * 42)        
         # Test if pseudo-observations are uniform on [0,1]
         pseudo_test = self._to_pseudo_observations(X_test)
         
         uniformity_results = {}
         
         for j in range(self.n_vars_):
-            pseudo_margin = pseudo_test[:, j]
-            
+            pseudo_margin = pseudo_test[:, j]            
             # Kolmogorov-Smirnov test against uniform distribution
-            ks_uniform_stat, ks_uniform_pvalue = stats.kstest(pseudo_margin, 'uniform')
-            
+            ks_uniform_stat, ks_uniform_pvalue = stats.kstest(pseudo_margin, 'uniform')            
             # Anderson-Darling test for uniformity
             # Transform to standard normal and test
             normal_transformed = stats.norm.ppf(np.clip(pseudo_margin, 1e-10, 1-1e-10))
-            ad_result = stats.anderson(normal_transformed, dist='norm')
-            
+            ad_result = stats.anderson(normal_transformed, dist='norm')            
             # Cramer-von Mises test for uniformity
             def cvm_uniform(data):
                 """Cramér-von Mises test for uniform distribution."""
@@ -400,8 +396,7 @@ class EmpiricalCopula:
         
         # Calculate average differences
         avg_spear_diff = np.mean([tests['spearman_difference'] for tests in dependence_results.values()])
-        avg_kendall_diff = np.mean([tests['kendall_difference'] for tests in dependence_results.values()])
-        
+        avg_kendall_diff = np.mean([tests['kendall_difference'] for tests in dependence_results.values()])        
         # Overall quality assessment
         total_tests = self.n_vars_ * 3 + len(dependence_results) + self.n_vars_ + 1
         total_failures = (ks_failures + mean_failures + var_failures + 
@@ -550,19 +545,6 @@ class EmpiricalCopula:
                     kendall_matrix[i, j], _ = stats.kendalltau(X[:, i], X[:, j])
         
         return kendall_matrix
-        """Get information about the fitted empirical copula."""
-        if not self.is_fitted_:
-            raise ValueError("Copula must be fitted first.")
-        
-        return {
-            'n_samples': self.n_samples_,
-            'n_vars': self.n_vars_,
-            'smoothing_method': self.smoothing_method,
-            'bandwidth': self.bandwidth,
-            'jitter_scale': self.jitter_scale,
-            'boundary_correction': self.boundary_correction,
-            'has_kde_model': self.kde_model_ is not None
-        }
     
     def __repr__(self) -> str:
         if self.is_fitted_:
