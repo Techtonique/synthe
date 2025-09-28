@@ -4,7 +4,7 @@ from synthe.conformal_inference import ConformalInference
 from scipy.stats import ks_2samp
 from scipy.spatial.distance import cdist
 
-np.random.seed(42)
+np.random.seed(1234)
 
 # Parameters for the mixture
 n_components = 3  # Number of Gaussian components

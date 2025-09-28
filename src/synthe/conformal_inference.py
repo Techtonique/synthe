@@ -5,6 +5,7 @@ import optuna
 import GPopt as gp
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import Matern, RBF, ConstantKernel as C
+from sklearn.preprocessing import StandardScaler
 
 from collections import namedtuple
 from scipy.spatial.distance import cdist
