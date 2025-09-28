@@ -186,7 +186,7 @@ class ConformalInference:
                 f"Unknown type_pi '{self.type_pi}'. Choose from None, 'bootstrap', or 'kde'."
             )
 
-    def _mmd_rbf(self, X, Y, bandwidth=None):
+
         """MMD with RBF kernel"""
         X = np.asarray(X, dtype=np.float64)
         Y = np.asarray(Y, dtype=np.float64)
@@ -216,9 +216,44 @@ class ConformalInference:
                  2 * np.sum(K_XY) / (n * m)
         
         return max(0, np.sqrt(mmd_sq))
-    
+
+    def _mmd_rbf(self, X, Y, bandwidth=None):
+        """MMD with RBF kernel (vectorized version)"""
+        X = np.asarray(X, dtype=np.float64)
+        Y = np.asarray(Y, dtype=np.float64)
+        
+        if X.ndim == 1:
+            X = X.reshape(-1, 1)
+        if Y.ndim == 1:
+            Y = Y.reshape(-1, 1)
+        
+        n, m = len(X), len(Y)
+        
+        # Compute pairwise squared Euclidean distance between points in X and Y
+        XX_dists = np.sum(X**2, axis=1)[:, None] + np.sum(X**2, axis=1) - 2 * np.dot(X, X.T)
+        YY_dists = np.sum(Y**2, axis=1)[:, None] + np.sum(Y**2, axis=1) - 2 * np.dot(Y, Y.T)
+        XY_dists = np.sum(X**2, axis=1)[:, None] + np.sum(Y**2, axis=1) - 2 * np.dot(X, Y.T)
+        
+        if bandwidth is None:
+            # Median heuristic for bandwidth
+            bandwidth = np.median(XX_dists[XX_dists > 0]) / 2
+            if bandwidth == 0:
+                bandwidth = 1.0
+        
+        # Compute the kernel matrices using broadcasting
+        K_XX = np.exp(-XX_dists / (2 * bandwidth**2))
+        K_YY = np.exp(-YY_dists / (2 * bandwidth**2))
+        K_XY = np.exp(-XY_dists / (2 * bandwidth**2))
+        
+        # MMD computation
+        mmd_sq = (np.sum(K_XX) - np.trace(K_XX)) / (n * (n - 1)) + \
+                (np.sum(K_YY) - np.trace(K_YY)) / (m * (m - 1)) - \
+                2 * np.sum(K_XY) / (n * m)
+        
+        return max(0, np.sqrt(mmd_sq))
+
     def _energy_distance(self, X, Y):
-        """Energy distance"""
+        """Energy distance (vectorized version)"""
         X = np.asarray(X, dtype=np.float64)
         Y = np.asarray(Y, dtype=np.float64)
         
@@ -230,10 +265,16 @@ class ConformalInference:
         n, m = len(X), len(Y)
         if n < 2 or m < 2:
             return np.inf
-            
-        XX = np.sum(cdist(X, X, 'euclidean')) / (n * (n - 1))
-        YY = np.sum(cdist(Y, Y, 'euclidean')) / (m * (m - 1))
-        XY = np.sum(cdist(X, Y, 'euclidean')) / (n * m)
+        
+        # Compute pairwise squared Euclidean distances
+        XX_dists = np.sum(X**2, axis=1)[:, None] + np.sum(X**2, axis=1) - 2 * np.dot(X, X.T)
+        YY_dists = np.sum(Y**2, axis=1)[:, None] + np.sum(Y**2, axis=1) - 2 * np.dot(Y, Y.T)
+        XY_dists = np.sum(X**2, axis=1)[:, None] + np.sum(Y**2, axis=1) - 2 * np.dot(X, Y.T)
+        
+        # Compute the Energy Distance
+        XX = np.sum(XX_dists) / (n * (n - 1))
+        YY = np.sum(YY_dists) / (m * (m - 1))
+        XY = np.sum(XY_dists) / (n * m)
         
         return max(0.0, 2 * XY - XX - YY)
     
