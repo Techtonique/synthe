@@ -2,6 +2,8 @@ import numpy as np
 import pandas as pd
 from synthe.conformal_inference import ConformalInference
 
+np.random.seed(42)
+
 # Parameters for the mixture
 n_components = 3  # Number of Gaussian components
 n_samples = 500  # Total number of samples

@@ -297,7 +297,7 @@ class ConformalInference:
                 kernel=self.kernel,
                 num_replications=n_samples,
                 seed=self.seed)
-            return calibrated_residuals_sims + self.obj.predict(random_covariates_new)[:, np.newaxis]                    
+            return calibrated_residuals_sims.T + self.obj.predict(random_covariates_new)[:, np.newaxis]                    
         else:
             copula = EmpiricalCopula()
             copula.fit(calibrated_residuals)

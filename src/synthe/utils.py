@@ -250,6 +250,6 @@ def simulate_replications(
         replications_df = replications_df.sample(
             n=n_obs, replace=True, random_state=42
         ).reset_index(drop=True)
-        return replications_df.values.T
+        return replications_df.values
 
-    return replications_df.values.T
+    return replications_df.values
