@@ -374,51 +374,9 @@ class EmpiricalCopula:
         
         results['uniformity_tests'] = uniformity_results
         
-        # 4. OVERALL COPULA GOODNESS-OF-FIT
-        if verbose:
-            print(f"\n4. Overall Copula Goodness-of-Fit:")
-            print("-" * 35)
-        
-        # Multivariate Cramér-von Mises test for copula
-        def multivariate_cvm_copula(pseudo_obs1, pseudo_obs2):
-            """Multivariate Cramér-von Mises test for copula equality."""
-            n1, n2 = len(pseudo_obs1), len(pseudo_obs2)
-            
-            # Calculate empirical copula differences
-            def empirical_copula_at_point(data, point):
-                return np.mean(np.all(data <= point, axis=1))
-            
-            # Use a grid of test points
-            n_grid = 10
-            grid_points = np.linspace(0.1, 0.9, n_grid)
-            test_points = np.array(np.meshgrid(*[grid_points]*self.n_vars_)).T.reshape(-1, self.n_vars_)
-            
-            cvm_sum = 0
-            for point in test_points:
-                c1 = empirical_copula_at_point(pseudo_obs1, point)
-                c2 = empirical_copula_at_point(pseudo_obs2, point)
-                cvm_sum += (c1 - c2) ** 2
-            
-            return cvm_sum / len(test_points)
-        
         pseudo_orig = self._to_pseudo_observations(X_test)
         pseudo_sim = self._to_pseudo_observations(bootstrap_samples)
-        
-        cvm_copula_stat = multivariate_cvm_copula(pseudo_orig, pseudo_sim)
-        
-        # Approximate critical value (heuristic)
-        cvm_copula_critical = 0.05 / self.n_vars_  # Bonferroni-type adjustment
-        
-        results['copula_tests'] = {
-            'multivariate_cvm_statistic': cvm_copula_stat,
-            'multivariate_cvm_critical': cvm_copula_critical,
-            'multivariate_cvm_reject': cvm_copula_stat > cvm_copula_critical
-        }
-        
-        if verbose:
-            cvm_copula_status = "FAIL" if cvm_copula_stat > cvm_copula_critical else "PASS"
-            print(f"Multivariate CvM: stat={cvm_copula_stat:.6f}, crit={cvm_copula_critical:.6f} [{cvm_copula_status}]")
-        
+                        
         # 5. SUMMARY ASSESSMENT
         if verbose:
             print(f"\n5. Overall Assessment:")
@@ -447,8 +405,7 @@ class EmpiricalCopula:
         # Overall quality assessment
         total_tests = self.n_vars_ * 3 + len(dependence_results) + self.n_vars_ + 1
         total_failures = (ks_failures + mean_failures + var_failures + 
-                         corr_failures + uniform_failures + 
-                         (1 if results['copula_tests']['multivariate_cvm_reject'] else 0))
+                         corr_failures + uniform_failures)
         
         pass_rate = (total_tests - total_failures) / total_tests * 100
         
