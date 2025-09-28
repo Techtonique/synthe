@@ -3,6 +3,7 @@ import nnetsauce as ns
 import numpy as np
 
 from collections import namedtuple
+from scipy.spatial.distance import cdist
 from sklearn.base import BaseEstimator, RegressorMixin
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import ExtraTreesRegressor
@@ -184,3 +185,63 @@ class ConformalInference:
             raise ValueError(
                 f"Unknown type_pi '{self.type_pi}'. Choose from None, 'bootstrap', or 'kde'."
             )
+
+    def _mmd_rbf(self, X, Y, bandwidth=None):
+        """MMD with RBF kernel"""
+        X = np.asarray(X, dtype=np.float64)
+        Y = np.asarray(Y, dtype=np.float64)
+        
+        if X.ndim == 1:
+            X = X.reshape(-1, 1)
+        if Y.ndim == 1:
+            Y = Y.reshape(-1, 1)
+        
+        if bandwidth is None:
+            # Median heuristic
+            XX_dists = cdist(X, X, 'sqeuclidean')
+            bandwidth = np.median(XX_dists[XX_dists > 0]) / 2
+            if bandwidth == 0:
+                bandwidth = 1.0
+        
+        def rbf_kernel(a, b, sigma):
+            return np.exp(-cdist(a, b, 'sqeuclidean') / (2 * sigma**2))
+        
+        K_XX = rbf_kernel(X, X, bandwidth)
+        K_YY = rbf_kernel(Y, Y, bandwidth)
+        K_XY = rbf_kernel(X, Y, bandwidth)
+        
+        n, m = len(X), len(Y)
+        mmd_sq = (np.sum(K_XX) - np.trace(K_XX)) / (n * (n - 1)) + \
+                 (np.sum(K_YY) - np.trace(K_YY)) / (m * (m - 1)) - \
+                 2 * np.sum(K_XY) / (n * m)
+        
+        return max(0, np.sqrt(mmd_sq))
+    
+    def _energy_distance(self, X, Y):
+        """Energy distance"""
+        X = np.asarray(X, dtype=np.float64)
+        Y = np.asarray(Y, dtype=np.float64)
+        
+        if X.ndim == 1:
+            X = X.reshape(-1, 1)
+        if Y.ndim == 1:
+            Y = Y.reshape(-1, 1)
+        
+        n, m = len(X), len(Y)
+        if n < 2 or m < 2:
+            return np.inf
+            
+        XX = np.sum(cdist(X, X, 'euclidean')) / (n * (n - 1))
+        YY = np.sum(cdist(Y, Y, 'euclidean')) / (m * (m - 1))
+        XY = np.sum(cdist(X, Y, 'euclidean')) / (n * m)
+        
+        return max(0.0, 2 * XY - XX - YY)
+    
+    def _compute_objective(self, y_true, y_synthetic):
+        """Compute chosen objective"""
+        if self.objective == 'mmd':
+            return self._mmd_rbf(y_true, y_synthetic, self.kernel_bandwidth)
+        elif self.objective == 'energy':
+            return self._energy_distance(y_true, y_synthetic)
+        else:
+            return self._mmd_rbf(y_true, y_synthetic, self.kernel_bandwidth)
