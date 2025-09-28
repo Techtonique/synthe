@@ -90,6 +90,8 @@ class ConformalInference:
         self.random_covariates_train_ = None 
         self.random_covariates_calibration_ = None 
         self.kde_ = None
+        self.X_train_ = None
+        self.X_calib_ = None
         self.res_opt_ = None
         self.copula = None
         self.obj = ns.Ridge2Regressor(n_hidden_features=5,
@@ -114,18 +116,11 @@ class ConformalInference:
 
             if len(X.shape) == 1: # 1d array   
 
-                if self.partition == False:             
-                    X_train, X_calibration = train_test_split(X, 
-                                                              test_size=self.split_ratio, 
-                                                              random_state=self.seed)          
-                else: 
-                    X_ = X.reshape(-1, 1)
-                    gmm = GMM(n_components=2, random_state=self.seed).fit(X_)
-                    labels = gmm.predict(X_)
-                    X_train, X_calibration, _, _ = train_test_split(
-                        X_, labels, test_size=self.split_ratio, 
-                        random_state=self.seed,
-                        stratify=labels)
+                X_train, X_calibration = train_test_split(X, 
+                                                            test_size=self.split_ratio, 
+                                                            random_state=self.seed)   
+                self.X_train_ = X_train
+                self.X_calib_ = X_calibration
                     
             else: # multi-dim array
 
@@ -144,6 +139,8 @@ class ConformalInference:
                     calib_idx = sub_calib.subsample()
                     X_train = X[train_idx]
                     X_calibration = X[calib_idx]
+                    self.X_train_ = X_train
+                    self.X_calib_ = X_calibration
                 else: 
                     gmm = GMM(n_components=2, random_state=self.seed).fit(X)
                     labels = gmm.predict(X)
@@ -151,6 +148,8 @@ class ConformalInference:
                         X, labels, test_size=self.split_ratio, 
                         random_state=self.seed,
                         stratify=labels)
+                    self.X_train_ = X_train 
+                    self.X_calib_ = X_calibration
                                   
         elif self.type_split == "sequential":
 
@@ -187,17 +186,19 @@ class ConformalInference:
                 # Make predictions on the calibration data
                 preds_calibration = obj.predict(self.random_covariates_calibration_)                
                 # Compute the residuals
-                calibrated_residuals = X_calibration - preds_calibration                
+                calibrated_residuals = X_calibration - preds_calibration 
+                if len(X.shape) == 1:
+                    calibrated_residuals = calibrated_residuals.ravel()                                               
                 # Handle the case for univariate or multivariate residuals
-                if len(X_calibration.shape) == 1:
+                if len(X.shape) == 1:
                     calibrated_residuals_sims = simulate_replications(
                         calibrated_residuals, 
                         method=self.type_pi,
                         kernel=self.kernel,
-                        num_replications=250,
+                        num_replications=275,
                         seed=self.seed
                     )
-                    synthetic_data = calibrated_residuals_sims + preds_calibration[:, np.newaxis]
+                    synthetic_data = calibrated_residuals_sims + preds_calibration.ravel()[:, np.newaxis]
                 else:
                     # For multivariate residuals, use copula sampling
                     copula = EmpiricalCopula()
@@ -224,7 +225,7 @@ class ConformalInference:
                         kernel=self.kernel,
                         num_replications=250,
                         seed=self.seed)
-                    synthetic_data = self.calibrated_residuals_sims_ + preds_calibration[:, np.newaxis]
+                    synthetic_data = self.calibrated_residuals_sims_ + preds_calibration[:, np.newaxis]                    
                 else:
                     self.copula = EmpiricalCopula()
                     self.copula.fit(self.calibrated_residuals_)
@@ -252,7 +253,7 @@ class ConformalInference:
                             n_init=10, n_iter=90, seed=3137,
                             n_jobs=1,
                             )
-                self.res_opt_ = gp_opt.optimize(verbose=1)
+                self.res_opt_ = gp_opt.optimize(verbose=2)
                 return self.res_opt_
         
         calibrate()
@@ -260,15 +261,48 @@ class ConformalInference:
         return self       
 
 
-    def sample(self, n_samples=100):
+    def sample(self, n_samples=100, seed=123):
         """Obtain predictions and prediction intervals
 
         Args:
 
             n_samples: an integer;
                 Number of samples to be generated
-        """                
-        return None 
+        """    
+        if self.optimizer == 'gpopt':
+            self.obj = ns.Ridge2Regressor(n_hidden_features=int(self.res_opt_.best_params['n_hidden_features']),
+                                          lambda1=10 ** self.res_opt_.best_params['log10_lambda1'],
+                                          lambda2=10 ** self.res_opt_.best_params['log10_lambda2'],
+                                          dropout=max(min(self.res_opt_.best_params['dropout'], 1), 0.5),
+                                          n_clusters=int(self.res_opt_.best_params['n_clusters']))
+        elif self.optimizer == 'optuna':
+            best_params = self.res_opt_
+            self.obj = ns.Ridge2Regressor(n_hidden_features=int(best_params[0]),
+                                          lambda1=10**best_params[1],
+                                          lambda2=10**best_params[2],
+                                          dropout=max(min(best_params[3], 1), 0.5),
+                                          n_clusters=int(best_params[4]))
+        np.random.seed(seed)
+        random_covariates_calib = np.random.randn(self.X_calib_.shape[0], 2)
+        random_covariates_new = np.random.randn(n_samples, 2)
+        print(self.random_covariates_train_.shape, self.X_train_.shape)
+        print(self.random_covariates_train_.dtype, self.X_train_.dtype)
+        self.obj.fit(self.random_covariates_train_, self.X_train_)
+        preds_calibration = self.obj.predict(random_covariates_calib)                
+        calibrated_residuals = self.X_calib_ - preds_calibration                
+        if len(self.X_train_.shape) == 1:
+            calibrated_residuals_sims = simulate_replications(
+                calibrated_residuals, 
+                method=self.type_pi,
+                kernel=self.kernel,
+                num_replications=n_samples,
+                seed=self.seed)
+            return calibrated_residuals_sims + self.obj.predict(random_covariates_new)[:, np.newaxis]                    
+        else:
+            copula = EmpiricalCopula()
+            copula.fit(calibrated_residuals)
+            return self.copula.sample(n_samples=n_samples) + preds_calibration[:, np.newaxis]
+        
         
     def _compute_objective(self, y_true, y_synthetic):
         """Compute chosen objective"""

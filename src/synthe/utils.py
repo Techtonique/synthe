@@ -114,6 +114,8 @@ def energy_distance(y_true, y_synthetic):
 
 def crps(y_true, y_synthetic):
     """Compute CRPS using properscoring package"""
+    y_true = np.asarray(y_true)
+    y_synthetic = np.asarray(y_synthetic)    
     return np.median(ps.crps_ensemble(y_true, y_synthetic))
 
 
@@ -248,6 +250,6 @@ def simulate_replications(
         replications_df = replications_df.sample(
             n=n_obs, replace=True, random_state=42
         ).reset_index(drop=True)
-        return replications_df.values
+        return replications_df.values.T
 
-    return replications_df.values
+    return replications_df.values.T
