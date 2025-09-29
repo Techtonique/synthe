@@ -3,7 +3,7 @@ import pandas as pd
 
 from synthe.empirical_copula import EmpiricalCopula
 
-log_returns = pd.read_csv("log_returns.csv")
+log_returns = pd.read_csv("https://raw.githubusercontent.com/Techtonique/datasets/refs/heads/main/time_series/multivariate/log_returns.csv")
 log_returns.drop(columns=["Unnamed: 0"], inplace=True)
 log_returns.index = pd.date_range(start="2024-04-24", 
                                   periods=len(log_returns), 

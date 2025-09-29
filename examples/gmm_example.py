@@ -5,7 +5,7 @@ Example demonstrating Gaussian Mixture Model sampling in EmpiricalCopula.
 
 import numpy as np
 import matplotlib.pyplot as plt
-from src.synthe.empirical_copula import EmpiricalCopula
+from synthe.empirical_copula import EmpiricalCopula
 
 def main():
     """Demonstrate GMM sampling functionality."""
