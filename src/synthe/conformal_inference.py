@@ -1,4 +1,3 @@
-
 import nnetsauce as ns
 import numpy as np
 import optuna
@@ -130,60 +129,53 @@ class ConformalInference:
         """
 
         if self.type_split == "random":
-
-            if len(X.shape) == 1: # 1d array   
-
-                X_train, X_calibration = train_test_split(X, 
-                                                            test_size=self.split_ratio, 
-                                                            random_state=self.seed)   
+            if len(X.shape) == 1:  # 1d array
+                X_train, X_calibration = train_test_split(
+                    X, test_size=self.split_ratio, random_state=self.seed
+                )
                 self.X_train_ = X_train
                 self.X_calib_ = X_calibration
-                    
-            else: # multi-dim array
-
-                if self.partition == False:             
+            else:  # multi-dim array
+                if self.partition == False:
                     gmm = GMM(n_components=2, random_state=self.seed).fit(X)
                     labels = gmm.predict(X)
-                    sub_train = SubSampler(y=labels, 
-                                           n_samples=X_train.shape[0],
-                                    seed=self.seed, 
-                                    n_jobs=None)                
-                    sub_calib = SubSampler(y=labels, 
-                                           n_samples=X_calibration.shape[0],
-                                    seed=self.seed+1000, 
-                                    n_jobs=None)      
-                    train_idx = sub_train.subsample()
-                    calib_idx = sub_calib.subsample()
+                    # Split indices for train/calib
+                    idx = np.arange(X.shape[0])
+                    train_idx, calib_idx = train_test_split(
+                        idx, test_size=self.split_ratio, random_state=self.seed, stratify=labels
+                    )
                     X_train = X[train_idx]
                     X_calibration = X[calib_idx]
                     self.X_train_ = X_train
                     self.X_calib_ = X_calibration
-                else: 
+                else:
                     gmm = GMM(n_components=2, random_state=self.seed).fit(X)
                     labels = gmm.predict(X)
                     X_train, X_calibration, _, _ = train_test_split(
-                        X, labels, test_size=self.split_ratio, 
+                        X, labels, test_size=self.split_ratio,
                         random_state=self.seed,
                         stratify=labels)
-                    self.X_train_ = X_train 
+                    self.X_train_ = X_train
                     self.X_calib_ = X_calibration
-                                  
-        elif self.type_split == "sequential":
 
+        elif self.type_split == "sequential":
             raise NotImplementedError(
                 "'sequential' split not implemented yet for 1d arrays"
             )            
         
         # Scale inputs for better numerical stability
         self.input_scaler_ = StandardScaler()
-        X_scaled = self.input_scaler_.fit_transform(X)
-        X_train_scaled = self.input_scaler_.transform(X_train)
-        X_calibration_scaled = self.input_scaler_.transform(X_calibration)
-        
+        if X.ndim == 1:
+            X_train_scaled = self.input_scaler_.fit_transform(self.X_train_.reshape(-1, 1)).ravel()
+            X_calibration_scaled = self.input_scaler_.transform(self.X_calib_.reshape(-1, 1)).ravel()
+        else:
+            X_train_scaled = self.input_scaler_.fit_transform(self.X_train_)
+            X_calibration_scaled = self.input_scaler_.transform(self.X_calib_)
+
+        # Génère les covariables aléatoires APRÈS le split, pour chaque split
         np.random.seed(self.seed)
-        self.random_covariates_ = np.random.randn(X.shape[0], 2)                                        
-        self.random_covariates_train_ = self.random_covariates_[:X_train.shape[0],:]
-        self.random_covariates_calibration_ = self.random_covariates_[X_train.shape[0]:,:]
+        self.random_covariates_train_ = np.random.randn(self.X_train_.shape[0], 2)
+        self.random_covariates_calibration_ = np.random.randn(self.X_calib_.shape[0], 2)
         self.calibrated_residuals_ = None        
         self.synthetic_data_ = None
 
@@ -326,20 +318,20 @@ class ConformalInference:
                 self.res_opt_ = study.best_trial
                 return self.res_opt_
             elif self.optimizer == 'gpopt':
-            gp_opt = gp.GPOpt(objective_func=objective_func,
-                        lower_bound = np.array([   3, -4, -4,   0, 0]),
-                        upper_bound = np.array([ 250,  5,  5, 0.5, 5]),
-                        params_names=["n_hidden_features", "log10_lambda1", "log10_lambda2", "dropout", "n_clusters"],
-                            surrogate_obj = GaussianProcessRegressor(
-                            kernel=Matern(nu=2.5),
-                            alpha=1e-6,
-                            normalize_y=True,
-                            n_restarts_optimizer=25,
-                            random_state=42,
-                        ),
-                            n_init=10, n_iter=90, seed=3137,
-                            n_jobs=1,
-                            )
+                gp_opt = gp.GPOpt(objective_func=objective_func,
+                            lower_bound = np.array([   3, -4, -4,   0, 0]),
+                            upper_bound = np.array([ 250,  5,  5, 0.5, 5]),
+                            params_names=["n_hidden_features", "log10_lambda1", "log10_lambda2", "dropout", "n_clusters"],
+                                surrogate_obj = GaussianProcessRegressor(
+                                kernel=Matern(nu=2.5),
+                                alpha=1e-6,
+                                normalize_y=True,
+                                n_restarts_optimizer=25,
+                                random_state=42,
+                            ),
+                                n_init=10, n_iter=90, seed=3137,
+                                n_jobs=1,
+                                )
                 self.res_opt_ = gp_opt.optimize(verbose=2)
                 return self.res_opt_
         
@@ -364,8 +356,15 @@ class ConformalInference:
         # Generate random covariates for sampling
         np.random.seed(self.seed)
         random_covariates_new = np.random.randn(n_samples, 2)
-        
-        # Generate predictions on scaled space
+
+        # Refit the model on training data before predicting
+        if self.X_train_.ndim == 1:
+            X_train_scaled = self.input_scaler_.transform(self.X_train_.reshape(-1, 1)).ravel()
+        else:
+            X_train_scaled = self.input_scaler_.transform(self.X_train_)
+
+        self.obj.fit(self.random_covariates_train_, X_train_scaled)
+
         preds_scaled = self.obj.predict(random_covariates_new)
         
         # Generate residuals using the fitted residual model
@@ -396,7 +395,7 @@ class ConformalInference:
             synthetic_data_scaled = preds_scaled
         
         # Rescale back to original scale
-        synthetic_data_original = self.input_scaler_.inverse_transform(synthetic_data_scaled)
+        synthetic_data_original = self.input_scaler_.inverse_transform(synthetic_data_scaled.reshape(-1, 1)).ravel()
         
         return synthetic_data_original 
         
