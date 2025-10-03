@@ -55,8 +55,7 @@ sim_stocks.fit(Y)
 samples_stocks = sim_stocks.sample(500)
 print("\nStocks simulation KRR:")
 print("Original mean/std:", np.mean(Y, axis=0), np.std(Y, axis=0))
-print("Simulated mean/std:", np.mean(samples_stocks, axis=0),
-      np.std(samples_stocks, axis=0))
+print("Simulated mean/std:", np.mean(samples_stocks, axis=0), np.std(samples_stocks, axis=0))
 # KS and AD tests for each marginal
 for i in range(Y.shape[1]):
     ks_stat, ks_p = ks_2samp(Y[:, i], samples_stocks[:, i])
@@ -81,7 +80,36 @@ for i in range(Y.shape[1]):
           f"AD statistic={ad_result.statistic:.4f}, "
           f"p-value={ad_result.significance_level:.4g}")
 
+sim_stocks = DistributionSimulator(model_type='xgboost', random_state=42, verbose=True, metric='mmd')
+sim_stocks.fit(Y)
+samples_stocks = sim_stocks.sample(500)
+print("\nStocks simulation XGB:")
+print("Original mean/std:", np.mean(Y, axis=0), np.std(Y, axis=0))
+print("Simulated mean/std:", np.mean(samples_stocks, axis=0),
+      np.std(samples_stocks, axis=0))
+# KS and AD tests for each marginal
+for i in range(Y.shape[1]):
+    ks_stat, ks_p = ks_2samp(Y[:, i], samples_stocks[:, i])
+    ad_result = anderson_ksamp([Y[:, i], samples_stocks[:, i]])
+    print(f"Stock {i}: KS statistic={ks_stat:.4f}, p-value={ks_p:.4g}; "
+          f"AD statistic={ad_result.statistic:.4f}, "
+          f"p-value={ad_result.significance_level:.4g}")
 
+
+sim_stocks = DistributionSimulator(model_type='xgboost', random_state=42, verbose=True, metric='energy')
+sim_stocks.fit(Y)
+samples_stocks = sim_stocks.sample(500)
+print("\nStocks simulation XGB:")
+print("Original mean/std:", np.mean(Y, axis=0), np.std(Y, axis=0))
+print("Simulated mean/std:", np.mean(samples_stocks, axis=0),
+      np.std(samples_stocks, axis=0))
+# KS and AD tests for each marginal
+for i in range(Y.shape[1]):
+    ks_stat, ks_p = ks_2samp(Y[:, i], samples_stocks[:, i])
+    ad_result = anderson_ksamp([Y[:, i], samples_stocks[:, i]])
+    print(f"Stock {i}: KS statistic={ks_stat:.4f}, p-value={ks_p:.4g}; "
+          f"AD statistic={ad_result.statistic:.4f}, "
+          f"p-value={ad_result.significance_level:.4g}")
 
 
 # # Optional: Plot for visual inspection

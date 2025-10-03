@@ -9,6 +9,7 @@ from scipy import stats
 from scipy.spatial.distance import cdist
 from sklearn.kernel_ridge import KernelRidge
 from sklearn.model_selection import train_test_split
+from empirical_copula import EmpiricalCopula
 import warnings
 
 try:
