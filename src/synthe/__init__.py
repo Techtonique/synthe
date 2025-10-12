@@ -1,18 +1,22 @@
 """Top-level package for synthe."""
 
 __author__ = """T. Moudiki"""
-__email__ = 'thierry.moudiki@gmail.com'
+__email__ = "thierry.moudiki@gmail.com"
 
 from .distribution_simulator import DistributionSimulator  # noqa: F401
 from .distro_simulator import DistroSimulator  # noqa: F401
-from .empirical_copula import EmpiricalCopula  # noqa: F401 
+from .empirical_copula import EmpiricalCopula  # noqa: F401
 from .stratified_sampling import StratifiedClusteringSubsampling
 from .row_subsampling import SubSampler
+from .healthsims import SmartHealthSimulator  # noqa: F401
+from .metrics import DistanceMetrics  # noqa: F401
 
 __all__ = [
     "DistributionSimulator",
     "DistroSimulator",
     "EmpiricalCopula",
     "StratifiedClusteringSubsampling",
-    "SubSampler"
+    "SubSampler",
+    "SmartHealthSimulator",
+    "DistanceMetrics",
 ]

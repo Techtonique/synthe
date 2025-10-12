@@ -32,7 +32,9 @@ dependencies = [
   "GPopt",
   "tqdm", 
   "properscoring",
-  "optuna"
+  "optuna",
+  "wordcloud",
+  "seaborn"
 ]
 requires-python = ">= 3.10"
 

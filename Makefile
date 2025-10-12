@@ -1,20 +1,23 @@
-.PHONY: clean clean-test clean-pyc clean-build docs servedocs build-site help
+.PHONY: clean clean-test clean-pyc clean-build docs help
 .DEFAULT_GOAL := help
 
 define BROWSER_PYSCRIPT
-import os, webbrowser, sys
+import os, webbrowser, sys, mkdocs
+
 from urllib.request import pathname2url
+
 webbrowser.open("file://" + pathname2url(os.path.abspath(sys.argv[1])))
 endef
 export BROWSER_PYSCRIPT
 
 define PRINT_HELP_PYSCRIPT
 import re, sys
+
 for line in sys.stdin:
-    match = re.match(r'^([a-zA-Z_-]+):.*?## (.*)$$', line)
-    if match:
-        target, help = match.groups()
-        print("%-20s %s" % (target, help))
+	match = re.match(r'^([a-zA-Z_-]+):.*?## (.*)$$', line)
+	if match:
+		target, help = match.groups()
+		print("%-20s %s" % (target, help))
 endef
 export PRINT_HELP_PYSCRIPT
 
@@ -26,12 +29,11 @@ help:
 clean: clean-build clean-pyc clean-test ## remove all build, test, coverage and Python artifacts
 
 clean-build: ## remove build artifacts
-	rm -fr build/ .eggs/
+	rm -fr build/
+	rm -fr dist/
+	rm -fr .eggs/	
 	find . -name '*.egg-info' -exec rm -fr {} +
-	find . -name '*.egg' -exec rm -rf {} +
-	find . -name '*.so' -exec rm -f {} +
-	find . -name '*.c' -exec rm -f {} +
-	find . -name '*.html' -exec rm -f {} +
+	find . -name '*.egg' -exec rm -fr {} +
 
 clean-pyc: ## remove Python file artifacts
 	find . -name '*.pyc' -exec rm -f {} +
@@ -39,70 +41,65 @@ clean-pyc: ## remove Python file artifacts
 	find . -name '*~' -exec rm -f {} +
 	find . -name '__pycache__' -exec rm -fr {} +
 
-clean-test: ## remove test and coverage artifacts
-	rm -fr .tox/ .pytest_cache/ htmlcov/
-	rm -f .coverage
+clean-test: ## remove test and coverage artifacts	
+	rm -fr htmlcov
 
 lint: ## check style with flake8
-	flake8 cybooster tests
+	flake8 synthe tests
 
-test: ## run tests quickly with the default Python
-	python setup.py test
+coverage: ## check code coverage quickly with the default Python	
+	coverage report --omit="venv/*,synthe/tests/*" --show-missing
 
-test-all: ## run tests on every Python version with tox
-	tox
+docs: install ## generate docs		
+	uv pip install black pdoc 
+	black src/synthe/* --line-length=80	
+	find src/synthe/ -name "*.py" -exec autopep8 --max-line-length=80 --in-place {} +
+	pdoc -t docs src/synthe/* --output-dir synthe-docs
+	find . -name '__pycache__' -exec rm -fr {} +
+	cp -rf synthe-docs/* ../../../Pro_Website/Techtonique.github.io/synthe
 
-coverage: ## check code coverage quickly with the default Python
-	coverage run --source cybooster setup.py test
-	coverage report -m
-	coverage html
-	$(BROWSER) htmlcov/index.html
-
-docs:  ## compile the docs watching for change
-	pip install furo mkdocs
-	python setup.py clean
-	python setup.py build_ext --inplace
-	MAKEFLAGS=--silent make -C cybooster/docs html
+servedocs: install ## compile the docs watching for change	 	
+	uv pip install black pdoc 
+	black synthe/* --line-length=80	
+	find synthe/ -name "*.py" -exec autopep8 --max-line-length=80 --in-place {} +
+	pdoc -t docs synthe/* 
 	find . -name '__pycache__' -exec rm -fr {} +
 
-servedocs: docs ## open docs in browser
-	$(BROWSER) cybooster/docs/_build/html/index.html
-	find . -name '__pycache__' -exec rm -fr {} +
-
-build-site: docs ## export mkdocs website to a folder
-	cp -rf cybooster/docs/_build/html/* ../../Pro_Website/Techtonique.github.io/cybooster
-	find . -name '__pycache__' -exec rm -fr {} +
+release: dist ## package and upload a release
+	pip install twine --ignore-installed
+	python3 -m twine upload --repository pypi dist/* --verbose
 
 dist: clean ## builds source and wheel package
 	python3 setup.py sdist
-	python3 setup.py bdist_wheel
+	python3 setup.py bdist_wheel	
 	ls -l dist
 
-install: ## install the package to the active Python's site-packages
-	uv pip install -e . --verbose
+install: clean ## install the package to the active Python's site-packages
+	uv pip install -e .
+
+build-site: docs ## export mkdocs website to a folder		
+	cp -rf synthe-docs/* ../../Pro_Website/Techtonique.github.io/synthe
+	find . -name '__pycache__' -exec rm -fr {} +
+
+run-custom: ## run all custom examples with one command
+	find examples -maxdepth 2 -name "*custom*.py" -exec  python3 {} \;
+
+run-glm: ## run all custom examples with one command
+	find examples -maxdepth 2 -name "*glm*.py" -exec  python3 {} \;
 
 run-examples: ## run all examples with one command
-	find examples -maxdepth 2 -name "*.py" -exec python3 {} \;
+	find examples -maxdepth 2 -name "*.py" -exec  python3 {} \;
 
-run-booster: ## run all boosting estimators examples with one command
-	find examples -maxdepth 2 -name "*boost*.py" -exec  python3 {} \;
+run-mts: ## run all mts examples with one command
+	find examples -maxdepth 2 -name "*mts*.py" -exec  python3 {} \;
 
-run-lazy: ## run all lazy estimators examples with one command
-	find examples -maxdepth 2 -name "*lazy*.py" -exec  python3 {} \;
+run-lazy: ## run all lazy examples with one command
+	find examples -maxdepth 2 -name "lazy*.py" -exec  python3 {} \;
 
-docker-build: ## Build Docker image for cybooster and create dist artifacts
-	docker build -t cybooster .
-	docker run --rm -v $(PWD)/dist:/app/dist cybooster sh -c "python3 setup.py sdist bdist_wheel"
+run-conformal: ## run all lazy examples with one command
+	find examples -maxdepth 2 -name "*conformal*.py" -exec  python3 {} \;
 
-docker-shell: ## Run an interactive shell inside the cybooster Docker container
-	docker run -it --rm cybooster bash
-
-docker-run-examples: ## Run all example scripts inside Docker
-	docker run --rm cybooster sh -c "pip install -e . && find examples -maxdepth 2 -name '*.py' -exec python3 {} \;"
-
-docker-run-booster: ## Run boosting example scripts inside Docker
-	docker run --rm cybooster sh -c "pip install -e . && find examples -maxdepth 2 -name '*boost*.py' -exec python3 {} \;"
-
-docker-run-lazy: ## Run lazy estimator example scripts inside Docker
-	docker run --rm cybooster sh -c "pip install -e . && find examples -maxdepth 2 -name '*lazy*.py' -exec python3 {} \;"
+run-tests: install ## run all the tests with one command
+	pip3 install coverage nose2
+	python3 -m coverage run -m unittest discover -s synthe/tests -p "*.py"	
 

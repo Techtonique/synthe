@@ -71,6 +71,7 @@ def is_factor(y):
     # Otherwise → regression
     return False
 
+
 def subsample_indices(
     data,
     method="random",

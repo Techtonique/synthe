@@ -1,17 +1,20 @@
 # synthe
 
-![PyPI version](https://img.shields.io/pypi/v/synthe.svg)
-[![Documentation Status](https://readthedocs.org/projects/synthe/badge/?version=latest)](https://synthe.readthedocs.io/en/latest/?version=latest)
+<hr>
 
-synthetic simulation
+A Python package for
+**synthetic data generation/simulation**
 
-* PyPI package: https://pypi.org/project/synthe/
-* Free software: BSD3 Clause Clear License
-* Documentation: https://synthe.readthedocs.io.
+![PyPI](https://img.shields.io/pypi/v/synthe) [![PyPI - License](https://img.shields.io/pypi/l/synthe)](LICENSE) [![Downloads](https://pepy.tech/badge/synthe)](https://pepy.tech/project/synthe) 
+[![Documentation](https://img.shields.io/badge/documentation-is_here-green)](https://techtonique.github.io/synthe/)
+
 
 ## Features
 
-* TODO
+- Generate synthetic data that preserves the statistical properties of the original dataset.
+- Generate realistic synthetic data for various applications.
+
+See [examples](examples/) for usage.
 
 ## Credits
 
