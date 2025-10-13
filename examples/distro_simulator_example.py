@@ -4,7 +4,7 @@ from time import time
 
 # Create some example data
 np.random.seed(42)
-n_samples = 5000
+n_samples = 500
 
 def example_X_dist(n):
       return np.random.normal(0, 1, (n, 2))
@@ -19,15 +19,11 @@ Y = np.column_stack([
 print("Testing with auto configuration...")
 generator = DistroSimulator(
       kernel='rbf', 
-      use_rff='auto',  # Let it decide automatically
-      rff_components='auto',  # Let it choose optimal components
-      kernel_approximation='rff',  # Use RFF (better than Nyström based on results)
-      force_rff_threshold=1000,  # Enable RFF for datasets > 1000 samples
       random_state=42
 )
 
 start = time()
-generator.fit(Y, example_X_dist, n_trials=10, metric='energy')
+generator.fit(Y, n_trials=10, metric='energy')
 print(f"Auto configuration fitting took {time() - start:.2f} seconds.")
 
 # Generate and test synthetic data
@@ -35,6 +31,13 @@ Y_synth = generator.sample(1000)
 results = generator.test_similarity(Y[:1000], Y_synth)
 
 print("\nFinal similarity results:")
+for key, value in results.items():
+      if key != 'corr_tests':
+            print(f"{key}: {value}")
+
+results = generator.compare_distributions(Y[:1000], Y_synth)
+
+print("\nFinal distribution comparison results:")
 for key, value in results.items():
       if key != 'corr_tests':
             print(f"{key}: {value}")

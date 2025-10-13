@@ -10,6 +10,7 @@ from sklearn.kernel_approximation import RBFSampler, Nystroem
 from sklearn.linear_model import Ridge
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import GridSearchCV
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import optuna
@@ -136,7 +137,7 @@ class DistroSimulator:
         """Setup JAX backend for GPU/TPU acceleration."""
         if not JAX_AVAILABLE:
             raise ImportError("JAX is required for GPU/TPU backend")
-
+        
         # JIT compiled distance functions
         @jit
         def pairwise_sq_dists_jax(X1, X2):
@@ -153,7 +154,7 @@ class DistroSimulator:
         self._pairwise_sq_dists_jax = pairwise_sq_dists_jax
         self._cdist_jax = cdist_jax
 
-    def _determine_components(self, n_samples, n_features):
+    def _determine_components(self, n_samples):
         """Automatically determine optimal number of components."""
         if self.rff_components == "auto":
             # Optimized heuristic based on performance results
@@ -181,7 +182,6 @@ class DistroSimulator:
                 effective_gamma = self.rff_gamma
             else:
                 effective_gamma = gamma
-
             # Determine number of components
             n_components = self.actual_rff_components_
 
@@ -198,31 +198,33 @@ class DistroSimulator:
                     n_components=n_components,
                     random_state=self.random_state,
                 )
-
             # Create pipeline with scaling, approximation, and Ridge
-            pipeline = Pipeline(
+            return Pipeline(
                 [
                     ("scaler", StandardScaler()),
                     ("approx", approximator),
                     ("ridge", Ridge(alpha=alpha)),
                 ]
             )
-            return pipeline
         else:
             # Standard KernelRidge
-            return KernelRidge(kernel=self.kernel, gamma=gamma, alpha=alpha)
+            return KernelRidge(kernel=self.kernel, 
+                               gamma=gamma, 
+                               alpha=alpha)
 
-    def _fit_residual_sampler(self):
+    def _fit_residual_sampler(self, **kwargs):
         """Fit the chosen residual sampling model."""
         if self.residuals is None or len(self.residuals) == 0:
             raise ValueError("No residuals available for fitting sampler")
 
         if self.residual_sampling == "kde":
-            self.kde_model_ = KernelDensity(
-                bandwidth=self.kde_bandwidth, kernel="gaussian"
-            )
+            kernel_bandwidths = {"bandwidth": np.logspace(-6, 6, 150)}
+            grid = GridSearchCV(KernelDensity(kernel=self.kernel, 
+                                              **kwargs),
+                                              param_grid=kernel_bandwidths,)
+            grid.fit(self.residuals_)
+            self.kde_model_ = grid.best_estimator_
             self.kde_model_.fit(self.residuals)
-            print(f"Fitted KDE sampler with bandwidth {self.kde_bandwidth}")
 
         elif self.residual_sampling == "gmm":
             self.gmm_model_ = GaussianMixture(
@@ -231,7 +233,6 @@ class DistroSimulator:
                 covariance_type="full",
             )
             self.gmm_model_.fit(self.residuals)
-            print(f"Fitted GMM sampler with {self.gmm_components} components")
 
     def _sample_residuals(self, num_samples):
         """Sample residuals using the chosen method."""
@@ -250,7 +251,6 @@ class DistroSimulator:
                 raise ValueError(
                     "KDE model not fitted. Call _fit_residual_sampler first."
                 )
-
             # Sample from KDE
             samples = self.kde_model_.sample(num_samples)
             return samples.reshape(-1, self.residuals.shape[1])
@@ -261,7 +261,6 @@ class DistroSimulator:
                 raise ValueError(
                     "GMM model not fitted. Call _fit_residual_sampler first."
                 )
-
             # Sample from GMM
             samples, _ = self.gmm_model_.sample(num_samples)
             return samples
@@ -297,7 +296,8 @@ class DistroSimulator:
             )
         elif self.clustering_method == "gmm":
             cluster_model = GaussianMixture(
-                n_components=self.n_clusters, random_state=self.random_state
+                n_components=self.n_clusters, 
+                random_state=self.random_state
             )
         else:
             raise ValueError("clustering_method must be 'kmeans' or 'gmm'")
@@ -308,21 +308,16 @@ class DistroSimulator:
 
     def _stratified_train_test_split(self, Y, n_train):
         """Create stratified train-test split based on clusters."""
-        if n_train >= len(Y):
-            raise ValueError("n_train must be less than the number of samples")
-
+        #if n_train >= len(Y):
+        #    raise ValueError("n_train must be less than the number of samples")
         # Compute clusters
         self.cluster_labels_ = self._compute_clusters(Y)
-
         # Perform stratified split
-        train_idx, test_idx = train_test_split(
+        return train_test_split(
             np.arange(len(Y)),
             train_size=n_train,
             stratify=self.cluster_labels_,
-            random_state=self.random_state,
-        )
-
-        return train_idx, test_idx
+            random_state=self.random_state,)
 
     def _mmd(self, u, v, kernel_sigma=1):
         """Maximum Mean Discrepancy between two distributions."""
@@ -354,15 +349,12 @@ class DistroSimulator:
             # JAX implementation
             u_jax = jnp.array(u)
             v_jax = jnp.array(v)
-
             dist_xx = self._cdist_jax(u_jax, u_jax)
             dist_yy = self._cdist_jax(v_jax, v_jax)
             dist_xy = self._cdist_jax(u_jax, v_jax)
-
             term1 = 2 * jnp.sum(dist_xy) / (n * m)
             term2 = jnp.sum(dist_xx) / (n * n)
             term3 = jnp.sum(dist_yy) / (m * m)
-
             return float(term1 - term2 - term3)
         else:
             # NumPy implementation
@@ -380,8 +372,7 @@ class DistroSimulator:
         if not self.is_fitted:
             raise ValueError("Model not fitted. Call fit() first.")
 
-        X_new = self.X_dist(num_samples)
-
+        X_new = self.X_dist[:num_samples]
         # Handle prediction based on model type
         if self.actual_use_rff_:
             # For RFF pipeline
@@ -392,14 +383,13 @@ class DistroSimulator:
 
         if preds.ndim == 1:
             preds = preds.reshape(-1, 1)
-
         # Sample residuals using the chosen method
-        e_star = self._sample_residuals(num_samples)
+        e_star = self._sample_residuals(preds.shape[0])
 
         return preds + e_star
 
     def fit(
-        self, Y, X_dist, n_train=None, metric="energy", n_trials=50, **kwargs
+        self, Y, n_train=None, metric="energy", n_trials=50, **kwargs
     ):
         """
         Fit the data generator to match the distribution of Y.
@@ -408,8 +398,6 @@ class DistroSimulator:
         -----------
         Y : array-like, shape (n_samples, n_features)
             Target multivariate data to emulate
-        X_dist : callable
-            Function that takes n_samples and returns input data X
         n_train : int, default=None
             Number of training samples (default: n_samples // 2)
         metric : str, default='energy'
@@ -438,7 +426,7 @@ class DistroSimulator:
 
         # Auto-enable RFF for large datasets with component determination
         if self.actual_use_rff_:
-            self.actual_rff_components_ = self._determine_components(n, d)
+            self.actual_rff_components_ = self._determine_components(n)
             if self.use_rff == "auto":
                 print(
                     f"Large dataset detected (n={n}). Auto-enabling {self.kernel_approximation.upper()} for scalability."
@@ -448,34 +436,18 @@ class DistroSimulator:
             n_train = n // 2
 
         # Store the input distribution function
-        self.X_dist = X_dist
+        self.X_dist = np.random.normal(0, 1, (n, 2))
 
         # Create stratified train-test split
         train_idx, test_idx = self._stratified_train_test_split(Y, n_train)
         Y_train = Y[train_idx]
         Y_test = Y[test_idx]
-        X_train = X_dist(n_train)
-
-        print(
-            f"Stratified split: {len(train_idx)} train, {len(test_idx)} test samples"
-        )
-        print(f"Residual sampling method: {self.residual_sampling}")
-        print(
-            f"Using {self.kernel_approximation.upper()}: {self.actual_use_rff_}"
-        )
-        if self.actual_use_rff_:
-            print(f"Components: {self.actual_rff_components_}")
-            print(f"Approximation method: {self.kernel_approximation}")
-        if self.residual_sampling == "kde":
-            print(f"KDE bandwidth: {self.kde_bandwidth}")
-        elif self.residual_sampling == "gmm":
-            print(f"GMM components: {self.gmm_components}")
+        X_train = self.X_dist[:n_train]
 
         def objective(trial):
             sigma = trial.suggest_float("sigma", 0.01, 10, log=True)
             lambd = trial.suggest_float("lambd", 1e-5, 1, log=True)
             gamma = 1 / (2 * sigma**2)
-
             # Create model with current parameters
             model = self._create_model(gamma, lambd)
             model.fit(X_train, Y_train)
@@ -503,48 +475,35 @@ class DistroSimulator:
         # Optimize hyperparameters
         study = optuna.create_study(direction="minimize")
         study.optimize(objective, n_trials=n_trials, **kwargs)
-
         # Store best parameters and fit final model
         self.best_params_ = study.best_params
         self.best_score_ = study.best_value
-
         sigma = self.best_params_["sigma"]
         lambd = self.best_params_["lambd"]
         gamma = 1 / (2 * sigma**2)
-
         # Fit final model with best parameters
         self.model = self._create_model(gamma, lambd)
         self.model.fit(X_train, Y_train)
-
         # Compute residuals
         preds_train = self.model.predict(X_train)
         if preds_train.ndim == 1:
             preds_train = preds_train.reshape(-1, 1)
         self.residuals = Y_train - preds_train
-
         # Fit the residual sampler
         self._fit_residual_sampler()
-
         self.is_fitted = True
-
         # Print final configuration
-        print(f"\nFinal configuration:")
-        print(f"  Best score: {self.best_score_:.6f}")
-        print(f"  Best sigma: {sigma:.4f}")
-        print(f"  Best lambda: {lambd:.6f}")
         if self.actual_use_rff_:
             print(
                 f"  Using {self.kernel_approximation.upper()} with {self.actual_rff_components_} components"
             )
         else:
             print(f"  Using standard kernel method")
-
         return self
 
     def _generate_pseudo_with_model(self, model, residuals, num_samples):
         """Helper method to generate data with a specific model."""
-        X_new = self.X_dist(num_samples)
-
+        X_new = self.X_dist[:num_samples]
         # Handle prediction based on model type
         if hasattr(model, "named_steps") and "rff" in model.named_steps:
             # RFF pipeline
@@ -559,13 +518,10 @@ class DistroSimulator:
         # Temporarily store residuals and fit sampler for this model
         original_residuals = self.residuals
         original_sampling = self.residual_sampling
-
         self.residuals = residuals
         self._fit_residual_sampler()
-
         # Sample residuals
         e_star = self._sample_residuals(num_samples)
-
         # Restore original state
         self.residuals = original_residuals
         if original_sampling == "kde":
@@ -595,7 +551,7 @@ class DistroSimulator:
         return self._generate_pseudo(n_samples)
 
     def compare_approximation_methods(
-        self, Y, X_dist, n_train=None, n_trials=20
+        self, Y, n_train=None, n_trials=20
     ):
         """
         Compare different kernel approximation methods.
@@ -604,8 +560,6 @@ class DistroSimulator:
         -----------
         Y : array-like
             Target data
-        X_dist : callable
-            Input distribution function
         n_train : int, default=None
             Number of training samples
         n_trials : int, default=20
@@ -635,7 +589,7 @@ class DistroSimulator:
             self.kernel_approximation = method
 
             start_time = time()
-            self.fit(Y, X_dist, n_train=n_train, n_trials=n_trials)
+            self.fit(Y, n_train=n_train, n_trials=n_trials)
             method_time = time() - start_time
             method_score = self.best_score_
             method_params = self.best_params_
@@ -651,7 +605,7 @@ class DistroSimulator:
         print(f"\nTesting Standard Kernel...")
         self.use_rff = False
         start_time = time()
-        self.fit(Y, X_dist, n_train=n_train, n_trials=n_trials)
+        self.fit(Y, n_train=n_train, n_trials=n_trials)
         standard_time = time() - start_time
         standard_score = self.best_score_
         standard_params = self.best_params_

@@ -642,13 +642,11 @@ class DistributionSimulator:
         X_new = self.X_dist(n_samples)
         preds = model.predict(X_new)
         preds = self._ensure_2d(preds)
-
         # Resample residuals with replacement
         rng = np.random.RandomState(self.random_state)
         n_res = residuals.shape[0]
         idx = rng.choice(n_res, n_samples, replace=True)
         e_star = residuals[idx]
-
         return preds + e_star
 
     def _fit_krr(self, X_train, Y_train, sigma, lambd):
