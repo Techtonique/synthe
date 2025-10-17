@@ -36,9 +36,9 @@ class DistroSimulator:
         backend="numpy",
         n_clusters=5,
         clustering_method="kmeans",
+        kde_kernel="gaussian",
         random_state=None,
         residual_sampling="bootstrap",
-        kde_bandwidth=1.0,
         gmm_components=3,
         use_rff="auto",
         rff_components="auto",
@@ -63,8 +63,6 @@ class DistroSimulator:
             Random seed for reproducibility
         residual_sampling : str, default='bootstrap'
             Method for sampling residuals ('bootstrap', 'kde', 'gmm')
-        kde_bandwidth : float, default=1.0
-            Bandwidth for KDE sampling
         gmm_components : int, default=3
             Number of components for GMM sampling
         use_rff : bool or 'auto', default='auto'
@@ -84,13 +82,13 @@ class DistroSimulator:
         self.clustering_method = clustering_method
         self.random_state = random_state
         self.residual_sampling = residual_sampling
-        self.kde_bandwidth = kde_bandwidth
         self.gmm_components = gmm_components
         self.use_rff = use_rff
         self.rff_components = rff_components
         self.rff_gamma = rff_gamma
         self.kernel_approximation = kernel_approximation
         self.force_rff_threshold = force_rff_threshold
+        self.kde_kernel = kde_kernel
 
         if random_state is not None:
             np.random.seed(random_state)
@@ -114,10 +112,9 @@ class DistroSimulator:
         elif backend in ["gpu", "tpu"] and not JAX_AVAILABLE:
             print("JAX not available. Falling back to NumPy backend.")
             self.backend = "numpy"
-
         # Initialize attributes that will be set during fitting
         self.model = None
-        self.residuals = None
+        self.residuals_ = None
         self.X_dist = None
         self.is_fitted = False
         self.best_params_ = None
@@ -133,8 +130,7 @@ class DistroSimulator:
     def _setup_jax_backend(self):
         """Setup JAX backend for GPU/TPU acceleration."""
         if not JAX_AVAILABLE:
-            raise ImportError("JAX is required for GPU/TPU backend")
-        
+            raise ImportError("JAX is required for GPU/TPU backend")        
         # JIT compiled distance functions
         @jit
         def pairwise_sq_dists_jax(X1, X2):
@@ -210,36 +206,36 @@ class DistroSimulator:
 
     def _fit_residual_sampler(self, **kwargs):
         """Fit the chosen residual sampling model."""
-        if self.residuals is None or len(self.residuals) == 0:
+        if self.residuals_ is None or len(self.residuals_) == 0:
             raise ValueError("No residuals available for fitting sampler")
 
         if self.residual_sampling == "kde":
             kernel_bandwidths = {"bandwidth": np.logspace(-6, 6, 150)}
-            grid = GridSearchCV(KernelDensity(kernel=self.kernel, 
+            grid = GridSearchCV(KernelDensity(kernel=self.kde_kernel, 
                                               **kwargs),
                                               param_grid=kernel_bandwidths,)
             grid.fit(self.residuals_)
             self.kde_model_ = grid.best_estimator_
-            self.kde_model_.fit(self.residuals)
+            self.kde_model_.fit(self.residuals_)
 
         elif self.residual_sampling == "gmm":
             self.gmm_model_ = GaussianMixture(
-                n_components=min(self.gmm_components, len(self.residuals)),
+                n_components=min(self.gmm_components, len(self.residuals_)),
                 random_state=self.random_state,
                 covariance_type="full",
             )
-            self.gmm_model_.fit(self.residuals)
+            self.gmm_model_.fit(self.residuals_)
 
     def _sample_residuals(self, num_samples):
         """Sample residuals using the chosen method."""
-        if self.residuals is None:
+        if self.residuals_ is None:
             raise ValueError("No residuals available for sampling")
 
         if self.residual_sampling == "bootstrap":
             # Original bootstrap method
-            n = self.residuals.shape[0]
+            n = self.residuals_.shape[0]
             idx = np.random.choice(n, num_samples, replace=True)
-            return self.residuals[idx]
+            return self.residuals_[idx]
 
         elif self.residual_sampling == "kde":
             # Kernel Density Estimation sampling
@@ -464,7 +460,7 @@ class DistroSimulator:
         preds_train = self.model.predict(X_train)
         if preds_train.ndim == 1:
             preds_train = preds_train.reshape(-1, 1)
-        self.residuals = Y_train - preds_train
+        self.residuals_ = Y_train - preds_train
         # Fit the residual sampler
         self._fit_residual_sampler()
         self.is_fitted = True
@@ -480,9 +476,10 @@ class DistroSimulator:
     def _generate_pseudo_with_model(self, model, residuals, num_samples):
         """Helper method to generate data with a specific model."""
         X_new = self.X_dist[:num_samples]
+        
         # Handle prediction based on model type
-        if hasattr(model, "named_steps") and "rff" in model.named_steps:
-            # RFF pipeline
+        if hasattr(model, "named_steps"):
+            # Pipeline (RFF or Nystroem)
             preds = model.predict(X_new)
         else:
             # Standard model
@@ -490,19 +487,28 @@ class DistroSimulator:
 
         if preds.ndim == 1:
             preds = preds.reshape(-1, 1)
-        # Temporarily store residuals and fit sampler for this model
-        original_residuals = self.residuals
-        original_sampling = self.residual_sampling
-        self.residuals = residuals
+        
+        # Temporarily store original state
+        original_residuals = self.residuals_
+        original_kde = self.kde_model_
+        original_gmm = self.gmm_model_
+        
+        # Set residuals for this model
+        self.residuals_ = residuals
+        
+        # Fit sampler with the new residuals
         self._fit_residual_sampler()
+        
+        # Sample residuals
+        sampled_residuals = self._sample_residuals(num_samples)
+        
         # Restore original state
-        self.residuals = original_residuals
-        if original_sampling == "kde":
-            self._fit_residual_sampler()  # Refit original KDE
-        elif original_sampling == "gmm":
-            self._fit_residual_sampler()  # Refit original GMM
-        return preds + self._sample_residuals(num_samples)
-
+        self.residuals_ = original_residuals
+        self.kde_model_ = original_kde
+        self.gmm_model_ = original_gmm
+        
+        return preds + sampled_residuals
+    
     def sample(self, n_samples=1):
         """
         Generate synthetic samples.
@@ -640,7 +646,7 @@ class DistroSimulator:
         self.residual_sampling = original_sampling
         self._fit_residual_sampler()
         # Plot comparison
-        n_dims = self.residuals.shape[1]
+        n_dims = self.residuals_.shape[1]
         fig, axes = plt.subplots(
             n_dims,
             len(sampling_methods) + 1,
@@ -653,7 +659,7 @@ class DistroSimulator:
         for dim in range(n_dims):
             # Original residuals
             axes[dim, 0].hist(
-                self.residuals[:, dim], bins=30, alpha=0.7, density=True
+                self.residuals_[:, dim], bins=30, alpha=0.7, density=True
             )
             axes[dim, 0].set_title(f"Original Residuals\nDim {dim+1}")
             axes[dim, 0].set_xlabel("Residual Value")
