@@ -12,14 +12,6 @@ sampler.fit(X_train)
 
 # Sample new data
 X_sampled = sampler.sample(1000, oversample=True, oversample_method="jitter")
-
-# Generate FRESH test data (completely independent)
-X_test = np.random.randn(1000, 2)  # Same distribution, different points
-
-# Proper evaluation - test if sampler captures the TRUE distribution
-sampler.plot_comparison(X_test)  # Compare with true distribution
-results = sampler.goodness_of_fit(X_test)  # Test against independent data
-
-print("Goodness-of-fit results against independent test data:")
-for key, value in results.items():
-    print(f"  {key}: {value}")
+sampler.plot_comparison(X_sampled)  # NOT X_test!
+results = sampler.goodness_of_fit(X_sampled)  # NOT X_test!
+print("Goodness-of-fit results:", results)
