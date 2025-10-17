@@ -1,6 +1,6 @@
 [project]
 name = "synthe"
-version = "0.3.1"
+version = "0.4.0"
 description = "synthetic simulation"
 readme = "README.md"
 authors = [

@@ -205,12 +205,11 @@ class DistroSimulator:
                     ("approx", approximator),
                     ("ridge", Ridge(alpha=alpha)),
                 ]
-            )
-        else:
-            # Standard KernelRidge
-            return KernelRidge(kernel=self.kernel, 
-                               gamma=gamma, 
-                               alpha=alpha)
+            )        
+        # Standard KernelRidge
+        return KernelRidge(kernel=self.kernel, 
+                            gamma=gamma, 
+                            alpha=alpha)
 
     def _fit_residual_sampler(self, **kwargs):
         """Fit the chosen residual sampling model."""
@@ -252,8 +251,7 @@ class DistroSimulator:
                     "KDE model not fitted. Call _fit_residual_sampler first."
                 )
             # Sample from KDE
-            samples = self.kde_model_.sample(num_samples)
-            return samples.reshape(-1, self.residuals.shape[1])
+            return self.kde_model_.sample(num_samples)
 
         elif self.residual_sampling == "gmm":
             # Gaussian Mixture Model sampling
@@ -262,8 +260,7 @@ class DistroSimulator:
                     "GMM model not fitted. Call _fit_residual_sampler first."
                 )
             # Sample from GMM
-            samples, _ = self.gmm_model_.sample(num_samples)
-            return samples
+            return self.gmm_model_.sample(num_samples)[0]
 
         else:
             raise ValueError(
@@ -289,27 +286,23 @@ class DistroSimulator:
     def _compute_clusters(self, Y):
         """Compute cluster labels for stratified splitting."""
         if self.clustering_method == "kmeans":
-            cluster_model = KMeans(
+            self.cluster_model_ = KMeans(
                 n_clusters=self.n_clusters,
                 random_state=self.random_state,
                 n_init=10,
             )
         elif self.clustering_method == "gmm":
-            cluster_model = GaussianMixture(
+            self.cluster_model_ = GaussianMixture(
                 n_components=self.n_clusters, 
                 random_state=self.random_state
             )
         else:
             raise ValueError("clustering_method must be 'kmeans' or 'gmm'")
-
-        cluster_model.fit(Y)
-        self.cluster_model_ = cluster_model
-        return cluster_model.predict(Y)
+        self.cluster_model_.fit(Y)
+        return self.cluster_model_.predict(Y)
 
     def _stratified_train_test_split(self, Y, n_train):
         """Create stratified train-test split based on clusters."""
-        #if n_train >= len(Y):
-        #    raise ValueError("n_train must be less than the number of samples")
         # Compute clusters
         self.cluster_labels_ = self._compute_clusters(Y)
         # Perform stratified split
@@ -325,12 +318,10 @@ class DistroSimulator:
             u = u.reshape(-1, 1)
         if v.ndim == 1:
             v = v.reshape(-1, 1)
-
         def kmat(A, B):
             return np.exp(
                 -self._pairwise_sq_dists(A, B) / (2 * kernel_sigma**2)
             )
-
         return (
             np.mean(kmat(u, u)) + np.mean(kmat(v, v)) - 2 * np.mean(kmat(u, v))
         )
@@ -361,7 +352,6 @@ class DistroSimulator:
             dist_xx = cdist(u, u, metric="euclidean")
             dist_yy = cdist(v, v, metric="euclidean")
             dist_xy = cdist(u, v, metric="euclidean")
-
             term1 = 2 * np.sum(dist_xy) / (n * m)
             term2 = np.sum(dist_xx) / (n * n)
             term3 = np.sum(dist_yy) / (m * m)
@@ -371,7 +361,6 @@ class DistroSimulator:
         """Generate synthetic data using the fitted model and residuals."""
         if not self.is_fitted:
             raise ValueError("Model not fitted. Call fit() first.")
-
         X_new = self.X_dist[:num_samples]
         # Handle prediction based on model type
         if self.actual_use_rff_:
@@ -380,13 +369,10 @@ class DistroSimulator:
         else:
             # For standard KernelRidge
             preds = self.model.predict(X_new)
-
         if preds.ndim == 1:
             preds = preds.reshape(-1, 1)
         # Sample residuals using the chosen method
-        e_star = self._sample_residuals(preds.shape[0])
-
-        return preds + e_star
+        return preds + self._sample_residuals(preds.shape[0])
 
     def fit(
         self, Y, n_train=None, metric="energy", n_trials=50, **kwargs
@@ -417,13 +403,11 @@ class DistroSimulator:
 
         n, d = Y.shape
         self.n_features_ = d
-
         # Determine whether to use RFF
         if self.use_rff == "auto":
             self.actual_use_rff_ = n >= self.force_rff_threshold
         else:
             self.actual_use_rff_ = self.use_rff
-
         # Auto-enable RFF for large datasets with component determination
         if self.actual_use_rff_:
             self.actual_rff_components_ = self._determine_components(n)
@@ -434,10 +418,8 @@ class DistroSimulator:
 
         if n_train is None:
             n_train = n // 2
-
         # Store the input distribution function
-        self.X_dist = np.random.normal(0, 1, (n, 2))
-
+        self.X_dist = np.random.normal(0, 1, (n, d))
         # Create stratified train-test split
         train_idx, test_idx = self._stratified_train_test_split(Y, n_train)
         Y_train = Y[train_idx]
@@ -451,14 +433,11 @@ class DistroSimulator:
             # Create model with current parameters
             model = self._create_model(gamma, lambd)
             model.fit(X_train, Y_train)
-
             preds_train = model.predict(X_train)
             if preds_train.ndim == 1:
                 preds_train = preds_train.reshape(-1, 1)
-
             res = Y_train - preds_train
             Y_sim = self._generate_pseudo_with_model(model, res, len(Y_test))
-
             if metric == "energy":
                 dist_val = self._custom_energy_distance(Y_test, Y_sim)
             elif metric == "mmd":
@@ -469,7 +448,6 @@ class DistroSimulator:
                 )
             else:
                 raise ValueError("Invalid metric for dimension")
-
             return dist_val
 
         # Optimize hyperparameters
@@ -514,22 +492,18 @@ class DistroSimulator:
 
         if preds.ndim == 1:
             preds = preds.reshape(-1, 1)
-
         # Temporarily store residuals and fit sampler for this model
         original_residuals = self.residuals
         original_sampling = self.residual_sampling
         self.residuals = residuals
         self._fit_residual_sampler()
-        # Sample residuals
-        e_star = self._sample_residuals(num_samples)
         # Restore original state
         self.residuals = original_residuals
         if original_sampling == "kde":
             self._fit_residual_sampler()  # Refit original KDE
         elif original_sampling == "gmm":
             self._fit_residual_sampler()  # Refit original GMM
-
-        return preds + e_star
+        return preds + self._sample_residuals(num_samples)
 
     def sample(self, n_samples=1):
         """
@@ -547,7 +521,6 @@ class DistroSimulator:
         """
         if not self.is_fitted:
             raise ValueError("Model not fitted. Call fit() first.")
-
         return self._generate_pseudo(n_samples)
 
     def compare_approximation_methods(
@@ -652,10 +625,8 @@ class DistroSimulator:
         """
         if not self.is_fitted:
             raise ValueError("Model not fitted. Call fit() first.")
-
         # Store original sampling method
         original_sampling = self.residual_sampling
-
         # Generate samples with different methods
         sampling_methods = ["bootstrap", "kde", "gmm"]
         samples = {}
@@ -667,11 +638,9 @@ class DistroSimulator:
             elif method == "gmm":
                 self._fit_residual_sampler()
             samples[method] = self._sample_residuals(n_samples)
-
         # Restore original method
         self.residual_sampling = original_sampling
         self._fit_residual_sampler()
-
         # Plot comparison
         n_dims = self.residuals.shape[1]
         fig, axes = plt.subplots(
@@ -763,47 +732,39 @@ class DistroSimulator:
 
         d = Y_orig.shape[1]
         results = {}
-
         # Test 1: Perm with energy
         results["energy_perm"] = self._perm_test(
             Y_orig, Y_sim, self._custom_energy_distance, n_perm
         )
-
         # Test 2: Perm with MMD
         results["mmd_perm"] = self._perm_test(
             Y_orig, Y_sim, lambda u, v: self._mmd(u, v), n_perm
         )
-
         # Test 3: Perm with avg Wasserstein on margins
         def avg_wass(u, v):
             return np.mean(
                 [stats.wasserstein_distance(u[:, i], v[:, i]) for i in range(d)]
             )
-
         results["avg_wass_perm"] = self._perm_test(
             Y_orig, Y_sim, avg_wass, n_perm
         )
-
         # Test 4: Min p-value from marginal KS tests
         ps_ks = [
             stats.ks_2samp(Y_orig[:, i], Y_sim[:, i]).pvalue for i in range(d)
         ]
         results["min_marginal_ks_p"] = min(ps_ks)
-
         # Test 5: Min p-value from marginal Anderson-Darling tests
         ps_ad = [
             stats.anderson_ksamp([Y_orig[:, i], Y_sim[:, i]]).significance_level
             for i in range(d)
         ]
         results["min_marginal_ad_p"] = min(ps_ad)
-
         # Test 6: Min p-value from marginal Cramer-von Mises tests
         ps_cvm = [
             stats.cramervonmises_2samp(Y_orig[:, i], Y_sim[:, i]).pvalue
             for i in range(d)
         ]
         results["min_marginal_cvm_p"] = min(ps_cvm)
-
         # Correlation test: Compare all pairwise correlations
         corr_results = {}
         pairs = [(i, j) for i in range(d) for j in range(i + 1, d)]
@@ -812,7 +773,6 @@ class DistroSimulator:
             r_sim = stats.pearsonr(Y_sim[:, i], Y_sim[:, j])[0]
             z, p = self._fisher_z_test(r_orig, r_sim, len(Y_orig), len(Y_sim))
             corr_results[f"corr_dim{i+1}_dim{j+1}"] = (r_orig, r_sim, z, p)
-
         results["corr_tests"] = corr_results
         return results
 
