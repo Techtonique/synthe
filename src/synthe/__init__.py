@@ -3,6 +3,7 @@
 __author__ = """T. Moudiki"""
 __email__ = "thierry.moudiki@gmail.com"
 
+from .adaptivehistsampler import AdaptiveHistogramSampler  # noqa: F401
 from .distro_simulator import DistroSimulator  # noqa: F401
 from .empirical_copula import EmpiricalCopula  # noqa: F401
 from .stratified_sampling import StratifiedClusteringSubsampling
@@ -11,6 +12,7 @@ from .healthsims import SmartHealthSimulator  # noqa: F401
 from .metrics import DistanceMetrics  # noqa: F401
 
 __all__ = [
+    "AdaptiveHistogramSampler",
     "DistroSimulator",
     "EmpiricalCopula",
     "StratifiedClusteringSubsampling",
