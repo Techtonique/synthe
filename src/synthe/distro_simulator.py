@@ -96,21 +96,18 @@ class DistroSimulator:
             np.random.seed(random_state)
             if JAX_AVAILABLE:
                 key = jax.random.PRNGKey(random_state)
-
         # Validate sampling method
         valid_sampling_methods = ["bootstrap", "kde", "gmm"]
         if residual_sampling not in valid_sampling_methods:
             raise ValueError(
                 f"residual_sampling must be one of {valid_sampling_methods}"
             )
-
         # Validate approximation method
         valid_approximations = ["rff", "nystroem"]
         if kernel_approximation not in valid_approximations:
             raise ValueError(
                 f"kernel_approximation must be one of {valid_approximations}"
             )
-
         # Initialize JAX if using GPU/TPU backend
         if backend in ["gpu", "tpu"] and JAX_AVAILABLE:
             self._setup_jax_backend()
@@ -263,6 +260,7 @@ class DistroSimulator:
             return self.gmm_model_.sample(num_samples)[0]
 
         else:
+            # Should not reach here due to validation in __init__
             raise ValueError(
                 f"Unknown sampling method: {self.residual_sampling}"
             )
