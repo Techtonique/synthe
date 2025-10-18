@@ -18,5 +18,5 @@ __all__ = [
     "StratifiedClusteringSubsampling",
     "SubSampler",
     "SmartHealthSimulator",
-    "DistanceMetrics",   
+    "DistanceMetrics",
 ]

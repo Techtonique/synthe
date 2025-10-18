@@ -80,66 +80,69 @@ class DistanceMetrics:
     def total_variation_distance(self, P, Q):
         """Total Variation Distance between two distributions."""
         return 0.5 * np.sum(np.abs(P - Q))
-    
-    def qqplot_with_summary(self, data1, data2, label1="Sample 1", label2="Sample 2"):
+
+    def qqplot_with_summary(
+        self, data1, data2, label1="Sample 1", label2="Sample 2"
+    ):
         data1 = np.asarray(data1)
         data2 = np.asarray(data2)
-        
+
         # Remove NaN values
         data1 = data1[~np.isnan(data1)]
         data2 = data2[~np.isnan(data2)]
-        
+
         # Q–Q plot
         n_quantiles = min(len(data1), len(data2))
         quantiles1 = np.percentile(data1, np.linspace(0, 100, n_quantiles))
         quantiles2 = np.percentile(data2, np.linspace(0, 100, n_quantiles))
-        
-        plt.figure(figsize=(6,6))
+
+        plt.figure(figsize=(6, 6))
         plt.scatter(quantiles1, quantiles2, alpha=0.7)
         min_val = min(quantiles1.min(), quantiles2.min())
         max_val = max(quantiles1.max(), quantiles2.max())
-        plt.plot([min_val, max_val], [min_val, max_val], 'r--', label='y = x')
+        plt.plot([min_val, max_val], [min_val, max_val], "r--", label="y = x")
         plt.xlabel(label1)
         plt.ylabel(label2)
         plt.title("Q–Q Plot")
         plt.legend()
         plt.grid(True)
         plt.show()
-        
+
         # Descriptive stats
         mean1, mean2 = np.mean(data1), np.mean(data2)
         std1, std2 = np.std(data1, ddof=1), np.std(data2, ddof=1)
         n1, n2 = len(data1), len(data2)
-        
+
         # Kolmogorov–Smirnov test
         ks_stat, ks_p = stats.ks_2samp(data1, data2)
-        
+
         # Anderson–Darling test (two-sample)
         ad_result = stats.anderson_ksamp([data1, data2])
         ad_stat = ad_result.statistic
         ad_p = ad_result.significance_level / 100  # convert % to proportion
-        
+
         # Quantile correlation
         corr = np.corrcoef(quantiles1, quantiles2)[0, 1]
-        
-        # Summary table
-        summary = pd.DataFrame({
-            "Statistic": [
-                "Sample size", 
-                "Mean", 
-                "Std. deviation", 
-                "KS statistic", 
-                "KS p-value",
-                "AD statistic",
-                "AD p-value",
-                "Quantile correlation"
-            ],
-            label1: [n1, mean1, std1, ks_stat, ks_p, ad_stat, ad_p, corr],
-            label2: [n2, mean2, std2, "", "", "", "", ""]
-        })
-        
-        return summary
 
+        # Summary table
+        summary = pd.DataFrame(
+            {
+                "Statistic": [
+                    "Sample size",
+                    "Mean",
+                    "Std. deviation",
+                    "KS statistic",
+                    "KS p-value",
+                    "AD statistic",
+                    "AD p-value",
+                    "Quantile correlation",
+                ],
+                label1: [n1, mean1, std1, ks_stat, ks_p, ad_stat, ad_p, corr],
+                label2: [n2, mean2, std2, "", "", "", "", ""],
+            }
+        )
+
+        return summary
 
 
 # # Example usage:

@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy import stats
 
+
 class AdaptiveHistogramSampler:
     def __init__(self, n_bins=10, method="quantile", seed=123):
         self.n_bins = n_bins
@@ -35,19 +36,25 @@ class AdaptiveHistogramSampler:
             bin_idx[:, j] = np.clip(bin_idx[:, j], 0, self.n_bins - 1)
         self.bin_indices = bin_idx
 
-        bin_ids = np.ravel_multi_index(self.bin_indices.T, (self.n_bins,) * self.d)
+        bin_ids = np.ravel_multi_index(
+            self.bin_indices.T, (self.n_bins,) * self.d
+        )
         unique_bins, counts = np.unique(bin_ids, return_counts=True)
         self.unique_bins = unique_bins
         self.bin_probs = counts / counts.sum()
 
-    def sample(self, n_samples, oversample=False, oversample_method="bootstrap", jitter_scale=0.05):
+    def sample(
+        self,
+        n_samples,
+        oversample=False,
+        oversample_method="bootstrap",
+        jitter_scale=0.05,
+    ):
         if self.bin_probs is None:
             raise RuntimeError("You must call `fit` before `sample`.")
 
         chosen_bins = self.rng.choice(
-            self.unique_bins,
-            size=n_samples,
-            p=self.bin_probs
+            self.unique_bins, size=n_samples, p=self.bin_probs
         )
 
         if not oversample:
@@ -64,7 +71,9 @@ class AdaptiveHistogramSampler:
 
     # --- Internal helpers ------------------------------------------------
     def _subsample_existing(self, chosen_bins):
-        bin_ids = np.ravel_multi_index(self.bin_indices.T, (self.n_bins,) * self.d)
+        bin_ids = np.ravel_multi_index(
+            self.bin_indices.T, (self.n_bins,) * self.d
+        )
         X_sampled = []
         for b in chosen_bins:
             idx_in_bin = np.where(bin_ids == b)[0]
@@ -106,20 +115,42 @@ class AdaptiveHistogramSampler:
         x_hist = fig.add_subplot(grid[1:, -1], sharey=main_ax)
 
         # 2D histogram
-        main_ax.hist2d(self.X[:, 0], self.X[:, 1], bins=bins, alpha=0.5, cmap="Blues")
-        main_ax.hist2d(X_sampled[:, 0], X_sampled[:, 1], bins=bins, alpha=0.5, cmap="Reds")
+        main_ax.hist2d(
+            self.X[:, 0], self.X[:, 1], bins=bins, alpha=0.5, cmap="Blues"
+        )
+        main_ax.hist2d(
+            X_sampled[:, 0], X_sampled[:, 1], bins=bins, alpha=0.5, cmap="Reds"
+        )
         main_ax.set_xlabel("X1")
         main_ax.set_ylabel("X2")
         main_ax.set_title("Joint distribution")
 
         # Marginals
-        y_hist.hist(self.X[:, 0], bins=bins, color="blue", alpha=0.5, density=True)
-        y_hist.hist(X_sampled[:, 0], bins=bins, color="red", alpha=0.5, density=True)
-        x_hist.hist(self.X[:, 1], bins=bins, orientation='horizontal', color="blue", alpha=0.5, density=True)
-        x_hist.hist(X_sampled[:, 1], bins=bins, orientation='horizontal', color="red", alpha=0.5, density=True)
+        y_hist.hist(
+            self.X[:, 0], bins=bins, color="blue", alpha=0.5, density=True
+        )
+        y_hist.hist(
+            X_sampled[:, 0], bins=bins, color="red", alpha=0.5, density=True
+        )
+        x_hist.hist(
+            self.X[:, 1],
+            bins=bins,
+            orientation="horizontal",
+            color="blue",
+            alpha=0.5,
+            density=True,
+        )
+        x_hist.hist(
+            X_sampled[:, 1],
+            bins=bins,
+            orientation="horizontal",
+            color="red",
+            alpha=0.5,
+            density=True,
+        )
 
-        y_hist.axis('off')
-        x_hist.axis('off')
+        y_hist.axis("off")
+        x_hist.axis("off")
 
         plt.show()
 
@@ -144,6 +175,6 @@ class AdaptiveHistogramSampler:
                 "ks_statistic": ks_stat,
                 "ks_pvalue": ks_p,
                 "ad_statistic": ad_result.statistic,
-                "ad_significance_level": ad_result.significance_level
+                "ad_significance_level": ad_result.significance_level,
             }
         return results

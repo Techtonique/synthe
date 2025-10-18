@@ -38,6 +38,7 @@ class DistroSimulator:
         clustering_method="kmeans",
         kde_kernel="gaussian",
         random_state=None,
+        conformalize=False,
         residual_sampling="bootstrap",
         gmm_components=3,
         use_rff="auto",
@@ -61,6 +62,8 @@ class DistroSimulator:
             Clustering method for stratification ('kmeans' or 'gmm')
         random_state : int, default=None
             Random seed for reproducibility
+        conformalize : bool
+            Use split conformal prediction or not
         residual_sampling : str, default='bootstrap'
             Method for sampling residuals ('bootstrap', 'kde', 'gmm')
         gmm_components : int, default=3
@@ -81,6 +84,7 @@ class DistroSimulator:
         self.n_clusters = n_clusters
         self.clustering_method = clustering_method
         self.random_state = random_state
+        self.conformalize = conformalize
         self.residual_sampling = residual_sampling
         self.gmm_components = gmm_components
         self.use_rff = use_rff
@@ -130,7 +134,8 @@ class DistroSimulator:
     def _setup_jax_backend(self):
         """Setup JAX backend for GPU/TPU acceleration."""
         if not JAX_AVAILABLE:
-            raise ImportError("JAX is required for GPU/TPU backend")        
+            raise ImportError("JAX is required for GPU/TPU backend")
+
         # JIT compiled distance functions
         @jit
         def pairwise_sq_dists_jax(X1, X2):
@@ -198,11 +203,9 @@ class DistroSimulator:
                     ("approx", approximator),
                     ("ridge", Ridge(alpha=alpha)),
                 ]
-            )        
+            )
         # Standard KernelRidge
-        return KernelRidge(kernel=self.kernel, 
-                            gamma=gamma, 
-                            alpha=alpha)
+        return KernelRidge(kernel=self.kernel, gamma=gamma, alpha=alpha)
 
     def _fit_residual_sampler(self, **kwargs):
         """Fit the chosen residual sampling model."""
@@ -211,9 +214,10 @@ class DistroSimulator:
 
         if self.residual_sampling == "kde":
             kernel_bandwidths = {"bandwidth": np.logspace(-6, 6, 150)}
-            grid = GridSearchCV(KernelDensity(kernel=self.kde_kernel, 
-                                              **kwargs),
-                                              param_grid=kernel_bandwidths,)
+            grid = GridSearchCV(
+                KernelDensity(kernel=self.kde_kernel, **kwargs),
+                param_grid=kernel_bandwidths,
+            )
             grid.fit(self.residuals_)
             self.kde_model_ = grid.best_estimator_
             self.kde_model_.fit(self.residuals_)
@@ -287,8 +291,7 @@ class DistroSimulator:
             )
         elif self.clustering_method == "gmm":
             self.cluster_model_ = GaussianMixture(
-                n_components=self.n_clusters, 
-                random_state=self.random_state
+                n_components=self.n_clusters, random_state=self.random_state
             )
         else:
             raise ValueError("clustering_method must be 'kmeans' or 'gmm'")
@@ -304,7 +307,8 @@ class DistroSimulator:
             np.arange(len(Y)),
             train_size=n_train,
             stratify=self.cluster_labels_,
-            random_state=self.random_state,)
+            random_state=self.random_state,
+        )
 
     def _mmd(self, u, v, kernel_sigma=1):
         """Maximum Mean Discrepancy between two distributions."""
@@ -312,10 +316,12 @@ class DistroSimulator:
             u = u.reshape(-1, 1)
         if v.ndim == 1:
             v = v.reshape(-1, 1)
+
         def kmat(A, B):
             return np.exp(
                 -self._pairwise_sq_dists(A, B) / (2 * kernel_sigma**2)
             )
+
         return (
             np.mean(kmat(u, u)) + np.mean(kmat(v, v)) - 2 * np.mean(kmat(u, v))
         )
@@ -368,9 +374,7 @@ class DistroSimulator:
         # Sample residuals using the chosen method
         return preds + self._sample_residuals(preds.shape[0])
 
-    def fit(
-        self, Y, n_train=None, metric="energy", n_trials=50, **kwargs
-    ):
+    def fit(self, Y, n_train=None, metric="energy", n_trials=50, **kwargs):
         """
         Fit the data generator to match the distribution of Y.
 
@@ -420,29 +424,111 @@ class DistroSimulator:
         Y_test = Y[test_idx]
         X_train = self.X_dist[:n_train]
 
-        def objective(trial):
-            sigma = trial.suggest_float("sigma", 0.01, 10, log=True)
-            lambd = trial.suggest_float("lambd", 1e-5, 1, log=True)
-            gamma = 1 / (2 * sigma**2)
-            # Create model with current parameters
-            model = self._create_model(gamma, lambd)
-            model.fit(X_train, Y_train)
-            preds_train = model.predict(X_train)
-            if preds_train.ndim == 1:
-                preds_train = preds_train.reshape(-1, 1)
-            res = Y_train - preds_train
-            Y_sim = self._generate_pseudo_with_model(model, res, len(Y_test))
-            if metric == "energy":
-                dist_val = self._custom_energy_distance(Y_test, Y_sim)
-            elif metric == "mmd":
-                dist_val = self._mmd(Y_test, Y_sim)
-            elif metric == "wasserstein" and d == 1:
-                dist_val = stats.wasserstein_distance(
-                    Y_test.flatten(), Y_sim.flatten()
+        if self.conformalize:
+
+            def objective(trial):
+                sigma = trial.suggest_float("sigma", 0.01, 10, log=True)
+                lambd = trial.suggest_float("lambd", 1e-5, 1, log=True)
+                gamma = 1 / (2 * sigma**2)
+                # Determine proper training set size (50% of training data)
+                n_proper_train = int(0.5 * len(Y_train))
+                # Use stratified split for proper training and calibration sets
+                proper_train_idx, calib_idx = self._stratified_train_test_split(
+                    Y_train, n_proper_train
                 )
-            else:
-                raise ValueError("Invalid metric for dimension")
-            return dist_val
+                # Split the data
+                X_proper_train = X_train[proper_train_idx]
+                Y_proper_train = Y_train[proper_train_idx]
+                X_calib = X_train[calib_idx]
+                Y_calib = Y_train[calib_idx]
+                # Standardize the response (Y) using proper training set statistics
+                if not hasattr(self, "y_scaler_"):
+                    self.y_scaler_ = StandardScaler()
+                    Y_proper_train_scaled = self.y_scaler_.fit_transform(
+                        Y_proper_train
+                    )
+                else:
+                    Y_proper_train_scaled = self.y_scaler_.transform(
+                        Y_proper_train
+                    )
+                # Create model with current parameters and fit on standardized proper training set
+                model = self._create_model(gamma, lambd)
+                model.fit(X_proper_train, Y_proper_train_scaled)
+                # Get predictions on calibration set and transform back to original scale
+                preds_calib_scaled = model.predict(X_calib)
+                if preds_calib_scaled.ndim == 1:
+                    preds_calib_scaled = preds_calib_scaled.reshape(-1, 1)
+                # Transform predictions back to original scale
+                preds_calib = self.y_scaler_.inverse_transform(
+                    preds_calib_scaled
+                )
+                # Calculate residuals on calibration set in original scale
+                res_calib = Y_calib - preds_calib
+                # Standardize residuals using calibration set statistics
+                if res_calib.ndim == 1:
+                    res_mean = np.mean(res_calib)
+                    res_std = np.std(res_calib, ddof=1)
+                    # Avoid division by zero
+                    res_std = res_std if res_std > 1e-10 else 1.0
+                    res_calib_standardized = (res_calib - res_mean) / res_std
+                else:
+                    res_mean = np.mean(res_calib, axis=0)
+                    res_std = np.std(res_calib, axis=0, ddof=1)
+                    # Avoid division by zero
+                    res_std = np.where(res_std > 1e-10, res_std, 1.0)
+                    res_calib_standardized = (res_calib - res_mean) / res_std
+
+                # Store the calibrated standardized residuals for use in the generation method
+                calibrated_residuals = (
+                    res_calib_standardized * res_std + res_mean
+                )
+
+                # Use the existing method to generate pseudo samples with conformal prediction
+                Y_sim = self._generate_pseudo_with_model(
+                    model, calibrated_residuals, len(Y_test)
+                )
+
+                # Calculate distance metric
+                if metric == "energy":
+                    dist_val = self._custom_energy_distance(Y_test, Y_sim)
+                elif metric == "mmd":
+                    dist_val = self._mmd(Y_test, Y_sim)
+                elif metric == "wasserstein" and d == 1:
+                    dist_val = stats.wasserstein_distance(
+                        Y_test.flatten(), Y_sim.flatten()
+                    )
+                else:
+                    raise ValueError("Invalid metric for dimension")
+
+                return dist_val
+
+        else:
+
+            def objective(trial):
+                sigma = trial.suggest_float("sigma", 0.01, 10, log=True)
+                lambd = trial.suggest_float("lambd", 1e-5, 1, log=True)
+                gamma = 1 / (2 * sigma**2)
+                # Create model with current parameters
+                model = self._create_model(gamma, lambd)
+                model.fit(X_train, Y_train)
+                preds_train = model.predict(X_train)
+                if preds_train.ndim == 1:
+                    preds_train = preds_train.reshape(-1, 1)
+                res = Y_train - preds_train
+                Y_sim = self._generate_pseudo_with_model(
+                    model, res, len(Y_test)
+                )
+                if metric == "energy":
+                    dist_val = self._custom_energy_distance(Y_test, Y_sim)
+                elif metric == "mmd":
+                    dist_val = self._mmd(Y_test, Y_sim)
+                elif metric == "wasserstein" and d == 1:
+                    dist_val = stats.wasserstein_distance(
+                        Y_test.flatten(), Y_sim.flatten()
+                    )
+                else:
+                    raise ValueError("Invalid metric for dimension")
+                return dist_val
 
         # Optimize hyperparameters
         study = optuna.create_study(direction="minimize")
@@ -476,7 +562,7 @@ class DistroSimulator:
     def _generate_pseudo_with_model(self, model, residuals, num_samples):
         """Helper method to generate data with a specific model."""
         X_new = self.X_dist[:num_samples]
-        
+
         # Handle prediction based on model type
         if hasattr(model, "named_steps"):
             # Pipeline (RFF or Nystroem)
@@ -487,28 +573,28 @@ class DistroSimulator:
 
         if preds.ndim == 1:
             preds = preds.reshape(-1, 1)
-        
+
         # Temporarily store original state
         original_residuals = self.residuals_
         original_kde = self.kde_model_
         original_gmm = self.gmm_model_
-        
+
         # Set residuals for this model
         self.residuals_ = residuals
-        
+
         # Fit sampler with the new residuals
         self._fit_residual_sampler()
-        
+
         # Sample residuals
         sampled_residuals = self._sample_residuals(num_samples)
-        
+
         # Restore original state
         self.residuals_ = original_residuals
         self.kde_model_ = original_kde
         self.gmm_model_ = original_gmm
-        
+
         return preds + sampled_residuals
-    
+
     def sample(self, n_samples=1):
         """
         Generate synthetic samples.
@@ -527,9 +613,7 @@ class DistroSimulator:
             raise ValueError("Model not fitted. Call fit() first.")
         return self._generate_pseudo(n_samples)
 
-    def compare_approximation_methods(
-        self, Y, n_train=None, n_trials=20
-    ):
+    def compare_approximation_methods(self, Y, n_train=None, n_trials=20):
         """
         Compare different kernel approximation methods.
 
@@ -744,11 +828,13 @@ class DistroSimulator:
         results["mmd_perm"] = self._perm_test(
             Y_orig, Y_sim, lambda u, v: self._mmd(u, v), n_perm
         )
+
         # Test 3: Perm with avg Wasserstein on margins
         def avg_wass(u, v):
             return np.mean(
                 [stats.wasserstein_distance(u[:, i], v[:, i]) for i in range(d)]
             )
+
         results["avg_wass_perm"] = self._perm_test(
             Y_orig, Y_sim, avg_wass, n_perm
         )
