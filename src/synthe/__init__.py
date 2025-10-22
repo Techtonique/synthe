@@ -10,6 +10,7 @@ from .stratified_sampling import StratifiedClusteringSubsampling
 from .row_subsampling import SubSampler
 from .healthsims import SmartHealthSimulator  # noqa: F401
 from .metrics import DistanceMetrics  # noqa: F401
+from .meboot import MaximumEntropyBootstrap
 
 __all__ = [
     "AdaptiveHistogramSampler",
@@ -19,4 +20,5 @@ __all__ = [
     "SubSampler",
     "SmartHealthSimulator",
     "DistanceMetrics",
+    "MaximumEntropyBootstrap",
 ]

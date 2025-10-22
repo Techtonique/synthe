@@ -298,13 +298,23 @@ class DistroSimulator:
         self.cluster_model_.fit(Y)
         return self.cluster_model_.predict(Y)
 
-    def _stratified_train_test_split(self, Y, n_train):
-        """Create stratified train-test split based on clusters."""
-        # Compute clusters
+    def _stratified_train_test_split(self, Y, n_train, sequential: bool = False):
+        """Create train-test split. Stratified by clusters or sequential if specified."""
+        try: 
+            n_samples = len(Y)
+        except Exception:
+            n_samples = Y.shape[0]
+
+        if sequential:
+            # --- Sequential split (no shuffling, preserves temporal order)
+            train_idx = np.arange(n_train)
+            test_idx = np.arange(n_train, n_samples)
+            return train_idx, test_idx
+
+        # --- Stratified split (default)
         self.cluster_labels_ = self._compute_clusters(Y)
-        # Perform stratified split
         return train_test_split(
-            np.arange(len(Y)),
+            np.arange(n_samples),
             train_size=n_train,
             stratify=self.cluster_labels_,
             random_state=self.random_state,
