@@ -78,7 +78,7 @@ install: clean ## install the package to the active Python's site-packages
 	uv pip install -e .
 
 build-site: docs ## export mkdocs website to a folder		
-	cp -rf synthe-docs/* ../../Pro_Website/Techtonique.github.io/synthe
+	cp -rf synthe-docs/* ../../../Pro_Website/Techtonique.github.io/synthe
 	find . -name '__pycache__' -exec rm -fr {} +
 
 run-custom: ## run all custom examples with one command

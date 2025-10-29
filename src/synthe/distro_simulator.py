@@ -1,6 +1,9 @@
 import numpy as np
-from scipy.spatial.distance import cdist
+import optuna
 import scipy.stats as stats
+import warnings
+
+from scipy.spatial.distance import cdist
 from sklearn.neighbors import KernelDensity
 from sklearn.mixture import GaussianMixture
 from sklearn.model_selection import train_test_split
@@ -13,9 +16,9 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import GridSearchCV
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
-import optuna
 from tqdm import tqdm
-import warnings
+from .meboot import MaximumEntropyBootstrap
+from .utils import bootstrap
 
 try:
     import jax
@@ -40,6 +43,7 @@ class DistroSimulator:
         random_state=None,
         conformalize=False,
         residual_sampling="bootstrap",
+        block_size=None,
         gmm_components=3,
         use_rff="auto",
         rff_components="auto",
@@ -65,7 +69,9 @@ class DistroSimulator:
         conformalize : bool
             Use split conformal prediction or not
         residual_sampling : str, default='bootstrap'
-            Method for sampling residuals ('bootstrap', 'kde', 'gmm')
+            Method for sampling residuals ('bootstrap', 'kde', 'gmm', 'block-bootstrap', 'me-bootstrap'). Where 'me-bootstrap' refers to Maximum Entropy Bootstrap.
+        block_size : int, default=None
+            Block size for block bootstrap (if applicable)
         gmm_components : int, default=3
             Number of components for GMM sampling
         use_rff : bool or 'auto', default='auto'
@@ -86,6 +92,7 @@ class DistroSimulator:
         self.random_state = random_state
         self.conformalize = conformalize
         self.residual_sampling = residual_sampling
+        self.block_size = block_size
         self.gmm_components = gmm_components
         self.use_rff = use_rff
         self.rff_components = rff_components
@@ -99,7 +106,7 @@ class DistroSimulator:
             if JAX_AVAILABLE:
                 key = jax.random.PRNGKey(random_state)
         # Validate sampling method
-        valid_sampling_methods = ["bootstrap", "kde", "gmm"]
+        valid_sampling_methods = ["bootstrap", "kde", "gmm", "block-bootstrap", "me-bootstrap"]
         if residual_sampling not in valid_sampling_methods:
             raise ValueError(
                 f"residual_sampling must be one of {valid_sampling_methods}"
@@ -258,6 +265,17 @@ class DistroSimulator:
                 )
             # Sample from GMM
             return self.gmm_model_.sample(num_samples)[0]
+        
+        elif self.residual_sampling == "me-bootstrap":
+            # Maximum Entropy Bootstrap sampling
+            meb = MaximumEntropyBootstrap(random_state=self.random_state)
+            meb.fit(self.residuals_.flatten())
+            return meb.sample(num_samples)
+        
+        elif self.residual_sampling == "block-bootstrap":
+            # Block Bootstrap sampling
+            return bootstrap(self.residuals_, num_samples, 
+                             block_size=self.block_size)
 
         else:
             # Should not reach here due to validation in __init__
@@ -298,9 +316,11 @@ class DistroSimulator:
         self.cluster_model_.fit(Y)
         return self.cluster_model_.predict(Y)
 
-    def _stratified_train_test_split(self, Y, n_train, sequential: bool = False):
+    def _stratified_train_test_split(
+        self, Y, n_train, sequential: bool = False
+    ):
         """Create train-test split. Stratified by clusters or sequential if specified."""
-        try: 
+        try:
             n_samples = len(Y)
         except Exception:
             n_samples = Y.shape[0]

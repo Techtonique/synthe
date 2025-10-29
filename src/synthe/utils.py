@@ -6,7 +6,68 @@ import properscoring as ps
 from scipy.stats import gaussian_kde, norm
 from scipy.interpolate import interp1d
 
+"""Tools for MTS."""
 
+# Authors: Thierry Moudiki <thierry.moudiki@gmail.com>
+#
+# License: BSD 3 Clear
+
+import numpy as np
+import pandas as pd
+
+try:
+    from sklearn.metrics import mean_pinball_loss
+except ImportError:
+    pass
+
+
+# (block) bootstrap
+def bootstrap(x, h, block_size=None, seed=123):
+    """
+    Generates block bootstrap indices for a given time series.
+
+    Parameters:
+    - x: numpy array, the original time series (univariate or multivariate).
+    - h: int, output length
+    - block_size: int, the size of the blocks to resample (if None, independent bootstrap).
+    - seed: int, reproducibility seed.
+
+    Returns:
+    - numpy arrays containing resampled time series.
+    """
+    if len(x.shape) == 1:
+        time_series_length = len(x)
+        ndim = 1
+    else:
+        time_series_length = x.shape[0]
+        ndim = x.shape[1]
+
+    if block_size is not None:
+
+        num_blocks = (time_series_length + block_size - 1) // block_size
+        all_indices = np.arange(time_series_length)
+
+        indices = []
+        for i in range(num_blocks):
+            np.random.seed(seed + i * 100)
+            start_index = np.random.randint(
+                0, time_series_length - block_size + 1
+            )
+            block_indices = all_indices[start_index: start_index + block_size]
+            indices.extend(block_indices)
+
+    else:  # block_size is None
+
+        indices = np.random.choice(
+            range(time_series_length), size=h, replace=True
+        )
+
+    if ndim == 1:
+        return x[np.array(indices[:h])]
+    else:
+        return x[np.array(indices[:h]), :]
+    
+    
 def mmd_rbf(y_true, y_synthetic, bandwidth=None):
     """MMD with RBF kernel (vectorized version)"""
     X, Y = np.asarray(y_true), np.asarray(y_synthetic)
