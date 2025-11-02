@@ -20,6 +20,10 @@ economic_data = 100 + trend + seasonal + noise
 meb = MaximumEntropyBootstrap(random_state=42)
 meb.fit(economic_data)
 
+# sample bootstrap replicates
+bootstrap_samples = meb.sample(reps=50)
+print(f"Generated {bootstrap_samples} bootstrap samples.")
+
 # Test if mean is different from 100
 result = meb.test_mean(null_value=100, alternative='two-sided')
 print(f"Test for mean = 100:")

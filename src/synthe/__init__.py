@@ -11,6 +11,7 @@ from .row_subsampling import SubSampler
 from .healthsims import SmartHealthSimulator  # noqa: F401
 from .metrics import DistanceMetrics  # noqa: F401
 from .meboot import MaximumEntropyBootstrap
+from .ts_distro_simulator import TsDistroSimulator  # noqa: F401
 
 __all__ = [
     "AdaptiveHistogramSampler",
@@ -21,4 +22,5 @@ __all__ = [
     "SmartHealthSimulator",
     "DistanceMetrics",
     "MaximumEntropyBootstrap",
+    "TsDistroSimulator"
 ]

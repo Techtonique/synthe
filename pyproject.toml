@@ -1,6 +1,6 @@
 [project]
 name = "synthe"
-version = "0.7.0"
+version = "0.8.0"
 description = "synthetic simulation"
 readme = "README.md"
 authors = [
@@ -34,7 +34,7 @@ dependencies = [
   "properscoring",
   "optuna",
   "wordcloud",
-  "seaborn"
+  "seaborn"  
 ]
 requires-python = ">= 3.10"
 

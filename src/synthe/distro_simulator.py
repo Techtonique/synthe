@@ -69,7 +69,8 @@ class DistroSimulator:
         conformalize : bool
             Use split conformal prediction or not
         residual_sampling : str, default='bootstrap'
-            Method for sampling residuals ('bootstrap', 'kde', 'gmm', 'block-bootstrap', 'me-bootstrap'). Where 'me-bootstrap' refers to Maximum Entropy Bootstrap.
+            Method for sampling residuals ('bootstrap', 'kde', 'gmm', 'block-bootstrap', 'me-bootstrap').
+            Where 'me-bootstrap' refers to Maximum Entropy Bootstrap.
         block_size : int, default=None
             Block size for block bootstrap (if applicable)
         gmm_components : int, default=3
@@ -267,11 +268,19 @@ class DistroSimulator:
             return self.gmm_model_.sample(num_samples)[0]
         
         elif self.residual_sampling == "me-bootstrap":
-            # Maximum Entropy Bootstrap sampling
+            
             meb = MaximumEntropyBootstrap(random_state=self.random_state)
-            meb.fit(self.residuals_.flatten())
-            return meb.sample(num_samples)
-        
+            # If residuals are shorter than num_samples, repeat or tile them
+            residuals = self.residuals_.flatten()
+            if residuals.shape[0] < num_samples:
+                # Repeat residuals to reach num_samples
+                repeats = int(np.ceil(num_samples / residuals.shape[0]))
+                residuals = np.tile(residuals, repeats)[:num_samples]
+            else:
+                residuals = residuals[:num_samples]
+            meb.fit(residuals)
+            return meb.sample(1)[:, 0].reshape(-1, 1)
+                
         elif self.residual_sampling == "block-bootstrap":
             # Block Bootstrap sampling
             return bootstrap(self.residuals_, num_samples, 
@@ -316,7 +325,7 @@ class DistroSimulator:
         self.cluster_model_.fit(Y)
         return self.cluster_model_.predict(Y)
 
-    def _stratified_train_test_split(
+    def _train_test_split(
         self, Y, n_train, sequential: bool = False
     ):
         """Create train-test split. Stratified by clusters or sequential if specified."""
@@ -449,7 +458,10 @@ class DistroSimulator:
         # Store the input distribution function
         self.X_dist = np.random.normal(0, 1, (n, d))
         # Create stratified train-test split
-        train_idx, test_idx = self._stratified_train_test_split(Y, n_train)
+        if self.residual_sampling in ("block-bootstrap", "me-bootstrap"):
+            train_idx, test_idx = self._train_test_split(Y, n_train, sequential=True)
+        else: 
+            train_idx, test_idx = self._train_test_split(Y, n_train, sequential=False)
         Y_train = Y[train_idx]
         Y_test = Y[test_idx]
         X_train = self.X_dist[:n_train]
@@ -463,7 +475,7 @@ class DistroSimulator:
                 # Determine proper training set size (50% of training data)
                 n_proper_train = int(0.5 * len(Y_train))
                 # Use stratified split for proper training and calibration sets
-                proper_train_idx, calib_idx = self._stratified_train_test_split(
+                proper_train_idx, calib_idx = self._train_test_split(
                     Y_train, n_proper_train
                 )
                 # Split the data
