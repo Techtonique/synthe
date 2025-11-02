@@ -255,13 +255,15 @@ class TsDistroSimulator:
             preds = preds[:num_samples]
 
         residuals = self._sample_residuals(preds.shape[0], num_samples)
+        print("residuals.shape", residuals.shape)
         # Pad or trim residuals if needed
         if residuals.shape[0] < num_samples:
             pad_len = num_samples - residuals.shape[0]
             residuals = np.vstack([residuals, np.zeros((pad_len, residuals.shape[1]))])
         elif residuals.shape[0] > num_samples:
             residuals = residuals[:num_samples]
-
+        print("preds.shape", preds.shape)
+        print("residuals.shape", residuals.shape)
         return preds + residuals
 
     def fit(self, Y, metric="energy", n_trials=50, **kwargs):
