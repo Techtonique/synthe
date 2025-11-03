@@ -107,7 +107,13 @@ class DistroSimulator:
             if JAX_AVAILABLE:
                 key = jax.random.PRNGKey(random_state)
         # Validate sampling method
-        valid_sampling_methods = ["bootstrap", "kde", "gmm", "block-bootstrap", "me-bootstrap"]
+        valid_sampling_methods = [
+            "bootstrap",
+            "kde",
+            "gmm",
+            "block-bootstrap",
+            "me-bootstrap",
+        ]
         if residual_sampling not in valid_sampling_methods:
             raise ValueError(
                 f"residual_sampling must be one of {valid_sampling_methods}"
@@ -266,9 +272,8 @@ class DistroSimulator:
                 )
             # Sample from GMM
             return self.gmm_model_.sample(num_samples)[0]
-        
+
         elif self.residual_sampling == "me-bootstrap":
-            
             meb = MaximumEntropyBootstrap(random_state=self.random_state)
             # If residuals are shorter than num_samples, repeat or tile them
             residuals = self.residuals_.flatten()
@@ -280,11 +285,12 @@ class DistroSimulator:
                 residuals = residuals[:num_samples]
             meb.fit(residuals)
             return meb.sample(1)[:, 0].reshape(-1, 1)
-                
+
         elif self.residual_sampling == "block-bootstrap":
             # Block Bootstrap sampling
-            return bootstrap(self.residuals_, num_samples, 
-                             block_size=self.block_size)
+            return bootstrap(
+                self.residuals_, num_samples, block_size=self.block_size
+            )
 
         else:
             # Should not reach here due to validation in __init__
@@ -325,9 +331,7 @@ class DistroSimulator:
         self.cluster_model_.fit(Y)
         return self.cluster_model_.predict(Y)
 
-    def _train_test_split(
-        self, Y, n_train, sequential: bool = False
-    ):
+    def _train_test_split(self, Y, n_train, sequential: bool = False):
         """Create train-test split. Stratified by clusters or sequential if specified."""
         try:
             n_samples = len(Y)
@@ -459,9 +463,13 @@ class DistroSimulator:
         self.X_dist = np.random.normal(0, 1, (n, d))
         # Create stratified train-test split
         if self.residual_sampling in ("block-bootstrap", "me-bootstrap"):
-            train_idx, test_idx = self._train_test_split(Y, n_train, sequential=True)
-        else: 
-            train_idx, test_idx = self._train_test_split(Y, n_train, sequential=False)
+            train_idx, test_idx = self._train_test_split(
+                Y, n_train, sequential=True
+            )
+        else:
+            train_idx, test_idx = self._train_test_split(
+                Y, n_train, sequential=False
+            )
         Y_train = Y[train_idx]
         Y_test = Y[test_idx]
         X_train = self.X_dist[:n_train]

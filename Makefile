@@ -60,9 +60,9 @@ docs: install ## generate docs
 
 servedocs: install ## compile the docs watching for change	 	
 	uv pip install black pdoc 
-	black synthe/* --line-length=80	
-	find synthe/ -name "*.py" -exec autopep8 --max-line-length=80 --in-place {} +
-	pdoc -t docs synthe/* 
+	black src/synthe/* --line-length=80	
+	find src/synthe/ -name "*.py" -exec autopep8 --max-line-length=80 --in-place {} +
+	pdoc -t docs src/synthe/* 
 	find . -name '__pycache__' -exec rm -fr {} +
 
 release: dist ## package and upload a release
@@ -75,6 +75,7 @@ dist: clean ## builds source and wheel package
 	ls -l dist
 
 install: clean ## install the package to the active Python's site-packages
+	black src/synthe/* --line-length=80	
 	uv pip install -e .
 
 build-site: docs ## export mkdocs website to a folder		

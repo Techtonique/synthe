@@ -43,7 +43,6 @@ def bootstrap(x, h, block_size=None, seed=123):
         ndim = x.shape[1]
 
     if block_size is not None:
-
         num_blocks = (time_series_length + block_size - 1) // block_size
         all_indices = np.arange(time_series_length)
 
@@ -57,7 +56,6 @@ def bootstrap(x, h, block_size=None, seed=123):
             indices.extend(block_indices)
 
     else:  # block_size is None
-
         indices = np.random.choice(
             range(time_series_length), size=h, replace=True
         )
@@ -66,8 +64,8 @@ def bootstrap(x, h, block_size=None, seed=123):
         return x[np.array(indices[:h])]
     else:
         return x[np.array(indices[:h]), :]
-    
-    
+
+
 def mmd_rbf(y_true, y_synthetic, bandwidth=None):
     """MMD with RBF kernel (vectorized version)"""
     X, Y = np.asarray(y_true), np.asarray(y_synthetic)

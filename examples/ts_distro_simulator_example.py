@@ -16,16 +16,17 @@ Y = time_series.reshape(-1, 1)
 # Initialize and fit the TsDistroSimulator
 simulator = TsDistroSimulator(
     kernel='rbf',
-    residual_sampling='block-bootstrap',
+    residual_sampling='kde',
     block_size=12,
     random_state=42
 )
 simulator.fit(Y, n_trials=50, metric='energy')
 
 # Generate synthetic samples
-Y_sim = simulator.sample(n_samples=120)
+Y_sim = simulator.sample(n_samples=250)
 print("Y", Y)
 print("Y_sim", Y_sim)
+print("Y_sim.shape", Y_sim.shape)
 
 # Plot original vs synthetic time series
 plt.figure(figsize=(14, 6))
