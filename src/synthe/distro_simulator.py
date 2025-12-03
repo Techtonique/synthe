@@ -45,6 +45,7 @@ class DistroSimulator:
         residual_sampling="bootstrap",
         block_size=None,
         gmm_components=3,
+        category_encoder=None,
         use_rff="auto",
         rff_components="auto",
         rff_gamma=None,
@@ -75,6 +76,8 @@ class DistroSimulator:
             Block size for block bootstrap (if applicable)
         gmm_components : int, default=3
             Number of components for GMM sampling
+        category_encoder: object, default=None
+            Category encoder
         use_rff : bool or 'auto', default='auto'
             Whether to use kernel approximation. 'auto' enables for large datasets
         rff_components : int or 'auto', default='auto'
@@ -95,6 +98,7 @@ class DistroSimulator:
         self.residual_sampling = residual_sampling
         self.block_size = block_size
         self.gmm_components = gmm_components
+        self.category_encoder = category_encoder
         self.use_rff = use_rff
         self.rff_components = rff_components
         self.rff_gamma = rff_gamma
@@ -439,6 +443,13 @@ class DistroSimulator:
         self : object
             Returns self
         """
+        if self.category_encoder is not None:
+            Y = self.category_encoder.fit_transform(Y)
+            try:
+                Y = Y.values
+            except Exception as e:
+                pass
+
         if Y.ndim == 1:
             Y = Y.reshape(-1, 1)
 

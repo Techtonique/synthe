@@ -52,7 +52,7 @@ def bootstrap(x, h, block_size=None, seed=123):
             start_index = np.random.randint(
                 0, time_series_length - block_size + 1
             )
-            block_indices = all_indices[start_index: start_index + block_size]
+            block_indices = all_indices[start_index : start_index + block_size]
             indices.extend(block_indices)
 
     else:  # block_size is None
