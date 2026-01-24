@@ -22,6 +22,7 @@ try:
     import jax
     import jax.numpy as jnp
     from jax import jit, vmap
+
     JAX_AVAILABLE = True
 except ImportError:
     JAX_AVAILABLE = False
@@ -105,11 +106,11 @@ class DistroSimulator:
 
         # Initialize random number generator with the seed
         self.rng = np.random.RandomState(random_state)
-        
+
         # Set global numpy seed for sklearn consistency
         if random_state is not None:
             np.random.seed(random_state)
-        
+
         # Initialize JAX random key if JAX is available
         self.jax_key = None
         if JAX_AVAILABLE and random_state is not None:
@@ -127,21 +128,21 @@ class DistroSimulator:
             raise ValueError(
                 f"residual_sampling must be one of {valid_sampling_methods}"
             )
-        
+
         # Validate approximation method
         valid_approximations = ["rff", "nystroem"]
         if kernel_approximation not in valid_approximations:
             raise ValueError(
                 f"kernel_approximation must be one of {valid_approximations}"
             )
-        
+
         # Initialize JAX if using GPU/TPU backend
         if backend in ["gpu", "tpu"] and JAX_AVAILABLE:
             self._setup_jax_backend()
         elif backend in ["gpu", "tpu"] and not JAX_AVAILABLE:
             print("JAX not available. Falling back to NumPy backend.")
             self.backend = "numpy"
-        
+
         # Initialize attributes that will be set during fitting
         self.model = None
         self.residuals_ = None
@@ -232,7 +233,10 @@ class DistroSimulator:
                 [
                     ("scaler", StandardScaler()),
                     ("approx", approximator),
-                    ("ridge", Ridge(alpha=alpha, random_state=self.random_state)),
+                    (
+                        "ridge",
+                        Ridge(alpha=alpha, random_state=self.random_state),
+                    ),
                 ]
             )
         # Standard KernelRidge
@@ -249,7 +253,7 @@ class DistroSimulator:
                 KernelDensity(kernel=self.kde_kernel, **kwargs),
                 param_grid=kernel_bandwidths,
                 cv=3,
-                random_state=self.random_state,
+                # random_state=self.random_state,
             )
             grid.fit(self.residuals_)
             self.kde_model_ = grid.best_estimator_
@@ -318,7 +322,9 @@ class DistroSimulator:
             #     seed=self.random_state,
             # )
             # Placeholder for block bootstrap
-            idx = self.rng.choice(len(self.residuals_), num_samples, replace=True)
+            idx = self.rng.choice(
+                len(self.residuals_), num_samples, replace=True
+            )
             return self.residuals_[idx]
 
         else:
@@ -345,18 +351,18 @@ class DistroSimulator:
     def _compute_clusters(self, Y):
         """Compute cluster labels for stratified splitting."""
         n_samples = len(Y)
-        
+
         # Adjust number of clusters based on dataset size to avoid tiny clusters
         # Rule: ensure at least 10 samples per cluster on average
         effective_n_clusters = min(self.n_clusters, max(2, n_samples // 10))
-        
+
         if effective_n_clusters < self.n_clusters:
             warnings.warn(
                 f"Reducing n_clusters from {self.n_clusters} to {effective_n_clusters} "
                 f"due to small dataset size (n={n_samples}).",
-                UserWarning
+                UserWarning,
             )
-        
+
         if self.clustering_method == "kmeans":
             self.cluster_model_ = KMeans(
                 n_clusters=effective_n_clusters,
@@ -365,12 +371,12 @@ class DistroSimulator:
             )
         elif self.clustering_method == "gmm":
             self.cluster_model_ = GaussianMixture(
-                n_components=effective_n_clusters, 
-                random_state=self.random_state
+                n_components=effective_n_clusters,
+                random_state=self.random_state,
             )
         else:
             raise ValueError("clustering_method must be 'kmeans' or 'gmm'")
-        
+
         self.cluster_model_.fit(Y)
         return self.cluster_model_.predict(Y)
 
@@ -389,22 +395,24 @@ class DistroSimulator:
 
         # Stratified split (default)
         self.cluster_labels_ = self._compute_clusters(Y)
-        
+
         # Check if stratification is possible
-        unique_labels, counts = np.unique(self.cluster_labels_, return_counts=True)
+        unique_labels, counts = np.unique(
+            self.cluster_labels_, return_counts=True
+        )
         min_cluster_size = counts.min()
-        
+
         # If any cluster has too few samples for stratification, fall back to random split
         if min_cluster_size < 2:
             warnings.warn(
                 f"Cluster sizes too small for stratification (min={min_cluster_size}). "
                 "Using random split instead.",
-                UserWarning
+                UserWarning,
             )
             indices = np.arange(n_samples)
             self.rng.shuffle(indices)
             return indices[:n_train], indices[n_train:]
-        
+
         try:
             return train_test_split(
                 np.arange(n_samples),
@@ -416,7 +424,7 @@ class DistroSimulator:
             # Fall back to random split if stratification fails
             warnings.warn(
                 f"Stratification failed: {e}. Using random split instead.",
-                UserWarning
+                UserWarning,
             )
             indices = np.arange(n_samples)
             self.rng.shuffle(indices)
@@ -515,13 +523,13 @@ class DistroSimulator:
 
         n, d = Y.shape
         self.n_features_ = d
-        
+
         # Determine whether to use RFF
         if self.use_rff == "auto":
             self.actual_use_rff_ = n >= self.force_rff_threshold
         else:
             self.actual_use_rff_ = self.use_rff
-        
+
         # Auto-enable RFF for large datasets with component determination
         if self.actual_use_rff_:
             self.actual_rff_components_ = self._determine_components(n)
@@ -532,10 +540,10 @@ class DistroSimulator:
 
         if n_train is None:
             n_train = n // 2
-        
+
         # Store the input distribution function
         self.X_dist = self.rng.normal(0, 1, (n, d))
-        
+
         # Create stratified train-test split
         if self.residual_sampling in ("block-bootstrap", "me-bootstrap"):
             train_idx, test_idx = self._train_test_split(
@@ -545,7 +553,7 @@ class DistroSimulator:
             train_idx, test_idx = self._train_test_split(
                 Y, n_train, sequential=False
             )
-        
+
         Y_train = Y[train_idx]
         Y_test = Y[test_idx]
         X_train = self.X_dist[:n_train]
@@ -554,18 +562,18 @@ class DistroSimulator:
             sigma = trial.suggest_float("sigma", 0.01, 10, log=True)
             lambd = trial.suggest_float("lambd", 1e-5, 1, log=True)
             gamma = 1 / (2 * sigma**2)
-            
+
             # Create model with current parameters
             model = self._create_model(gamma, lambd)
             model.fit(X_train, Y_train)
             preds_train = model.predict(X_train)
-            
+
             if preds_train.ndim == 1:
                 preds_train = preds_train.reshape(-1, 1)
-            
+
             res = Y_train - preds_train
             Y_sim = self._generate_pseudo_with_model(model, res, len(Y_test))
-            
+
             if metric == "energy":
                 dist_val = self._custom_energy_distance(Y_test, Y_sim)
             elif metric == "mmd":
@@ -576,35 +584,37 @@ class DistroSimulator:
                 )
             else:
                 raise ValueError("Invalid metric for dimension")
-            
+
             return dist_val
 
         # Optimize hyperparameters with seeded sampler
         sampler = optuna.samplers.TPESampler(seed=self.random_state)
         study = optuna.create_study(direction="minimize", sampler=sampler)
-        study.optimize(objective, n_trials=n_trials, show_progress_bar=False, **kwargs)
-        
+        study.optimize(
+            objective, n_trials=n_trials, show_progress_bar=False, **kwargs
+        )
+
         # Store best parameters and fit final model
         self.best_params_ = study.best_params
         self.best_score_ = study.best_value
         sigma = self.best_params_["sigma"]
         lambd = self.best_params_["lambd"]
         gamma = 1 / (2 * sigma**2)
-        
+
         # Fit final model with best parameters
         self.model = self._create_model(gamma, lambd)
         self.model.fit(X_train, Y_train)
-        
+
         # Compute residuals
         preds_train = self.model.predict(X_train)
         if preds_train.ndim == 1:
             preds_train = preds_train.reshape(-1, 1)
         self.residuals_ = Y_train - preds_train
-        
+
         # Fit the residual sampler
         self._fit_residual_sampler()
         self.is_fitted = True
-        
+
         # Print final configuration
         if self.actual_use_rff_:
             print(
@@ -612,7 +622,7 @@ class DistroSimulator:
             )
         else:
             print(f"Using standard kernel method")
-        
+
         return self
 
     def _generate_pseudo_with_model(self, model, residuals, num_samples):
@@ -664,3 +674,682 @@ class DistroSimulator:
             raise ValueError("Model not fitted. Call fit() first.")
         return self._generate_pseudo(n_samples)
 
+    def compare_approximation_methods(self, Y, n_train=None, n_trials=20):
+        """
+        Compare different kernel approximation methods.
+
+        Parameters:
+        -----------
+        Y : array-like
+            Target data
+        n_train : int, default=None
+            Number of training samples
+        n_trials : int, default=20
+            Number of optimization trials
+
+        Returns:
+        --------
+        comparison_results : dict
+            Comparison results
+        """
+        if Y.ndim == 1:
+            Y = Y.reshape(-1, 1)
+
+        print("Comparing Kernel Approximation Methods...")
+
+        # Store original settings
+        original_use_rff = self.use_rff
+        original_approximation = self.kernel_approximation
+        original_is_fitted = self.is_fitted
+
+        methods = ["rff", "nystroem"]
+        results = {}
+
+        for method in methods:
+            print(f"\nTesting {method.upper()}...")
+            self.use_rff = True
+            self.kernel_approximation = method
+
+            start_time = time()
+            self.fit(Y, n_train=n_train, n_trials=n_trials)
+            method_time = time() - start_time
+            method_score = self.best_score_
+            method_params = self.best_params_
+
+            results[method] = {
+                "time": method_time,
+                "score": method_score,
+                "params": method_params,
+                "components": self.actual_rff_components_,
+            }
+
+        # Test standard method for comparison
+        print(f"\nTesting Standard Kernel...")
+        self.use_rff = False
+        start_time = time()
+        self.fit(Y, n_train=n_train, n_trials=n_trials)
+        standard_time = time() - start_time
+        standard_score = self.best_score_
+        standard_params = self.best_params_
+
+        results["standard"] = {
+            "time": standard_time,
+            "score": standard_score,
+            "params": standard_params,
+            "components": "N/A",
+        }
+
+        # Restore original settings
+        self.use_rff = original_use_rff
+        self.kernel_approximation = original_approximation
+        self.is_fitted = original_is_fitted
+
+        # Print comparison
+        print("\n" + "=" * 60)
+        print("KERNEL APPROXIMATION COMPARISON RESULTS")
+        print("=" * 60)
+
+        for method in ["standard"] + methods:
+            data = results[method]
+            print(f"\n{method.upper()}:")
+            print(f"  Time: {data['time']:.2f}s")
+            print(f"  Score: {data['score']:.6f}")
+            print(f"  Components: {data['components']}")
+            if method != "standard":
+                speedup = standard_time / data["time"]
+                score_ratio = data["score"] / standard_score
+                print(f"  Speedup: {speedup:.2f}x")
+                print(f"  Score Ratio: {score_ratio:.4f}")
+
+        return results
+
+    def compare_residual_sampling(self, n_samples=1000):
+        """
+        Compare different residual sampling methods visually.
+
+        Parameters:
+        -----------
+        n_samples : int, default=1000
+            Number of samples to generate for comparison
+        """
+        if not self.is_fitted:
+            raise ValueError("Model not fitted. Call fit() first.")
+        # Store original sampling method
+        original_sampling = self.residual_sampling
+        # Generate samples with different methods
+        sampling_methods = ["bootstrap", "kde", "gmm"]
+        samples = {}
+
+        for method in sampling_methods:
+            self.residual_sampling = method
+            if method == "kde":
+                self._fit_residual_sampler()
+            elif method == "gmm":
+                self._fit_residual_sampler()
+            samples[method] = self._sample_residuals(n_samples)
+        # Restore original method
+        self.residual_sampling = original_sampling
+        self._fit_residual_sampler()
+        # Plot comparison
+        n_dims = self.residuals_.shape[1]
+        fig, axes = plt.subplots(
+            n_dims,
+            len(sampling_methods) + 1,
+            figsize=(5 * (len(sampling_methods) + 1), 4 * n_dims),
+        )
+
+        if n_dims == 1:
+            axes = axes.reshape(1, -1)
+
+        for dim in range(n_dims):
+            # Original residuals
+            axes[dim, 0].hist(
+                self.residuals_[:, dim], bins=30, alpha=0.7, density=True
+            )
+            axes[dim, 0].set_title(f"Original Residuals\nDim {dim+1}")
+            axes[dim, 0].set_xlabel("Residual Value")
+            axes[dim, 0].set_ylabel("Density")
+
+            # Sampled residuals
+            for j, method in enumerate(sampling_methods):
+                col = j + 1
+                axes[dim, col].hist(
+                    samples[method][:, dim], bins=30, alpha=0.7, density=True
+                )
+                axes[dim, col].set_title(
+                    f"{method.upper()} Sampling\nDim {dim+1}"
+                )
+                axes[dim, col].set_xlabel("Residual Value")
+                axes[dim, col].set_ylabel("Density")
+
+        plt.tight_layout()
+        plt.show()
+
+        return samples
+
+    def _perm_test(self, Y_orig, Y_sim, stat_func, n_perm=1000):
+        """Permutation test for distribution comparison."""
+        if Y_orig.ndim == 1:
+            Y_orig = Y_orig.reshape(-1, 1)
+        if Y_sim.ndim == 1:
+            Y_sim = Y_sim.reshape(-1, 1)
+
+        obs = stat_func(Y_orig, Y_sim)
+        combined = np.vstack((Y_orig, Y_sim))
+        n1 = Y_orig.shape[0]
+        perms = np.zeros(n_perm)
+
+        for i in range(n_perm):
+            idx = self.rng.permutation(combined.shape[0])
+            p1 = combined[idx[:n1]]
+            p2 = combined[idx[n1:]]
+            perms[i] = stat_func(p1, p2)
+
+        pval = (np.sum(perms >= obs) + 1) / (n_perm + 1)
+        return obs, pval
+
+    def _fisher_z_test(self, r1, r2, n1, n2):
+        """Fisher z-test for comparing correlation coefficients."""
+        z1 = np.arctanh(r1)
+        z2 = np.arctanh(r2)
+        z = (z1 - z2) / np.sqrt(1 / (n1 - 3) + 1 / (n2 - 3))
+        p = 2 * (1 - stats.norm.cdf(np.abs(z)))
+        return z, p
+
+    def test_similarity(self, Y_orig, Y_sim, n_perm=1000):
+        """
+        Test statistical similarity between original and synthetic data.
+
+        Parameters:
+        -----------
+        Y_orig : array-like
+            Original data
+        Y_sim : array-like
+            Synthetic data
+        n_perm : int, default=1000
+            Number of permutations for permutation tests
+
+        Returns:
+        --------
+        results : dict
+            Dictionary containing test results
+        """
+        if Y_orig.ndim == 1:
+            Y_orig = Y_orig.reshape(-1, 1)
+        if Y_sim.ndim == 1:
+            Y_sim = Y_sim.reshape(-1, 1)
+
+        d = Y_orig.shape[1]
+        results = {}
+        # Test 1: Perm with energy
+        results["energy_perm"] = self._perm_test(
+            Y_orig, Y_sim, self._custom_energy_distance, n_perm
+        )
+        # Test 2: Perm with MMD
+        results["mmd_perm"] = self._perm_test(
+            Y_orig, Y_sim, lambda u, v: self._mmd(u, v), n_perm
+        )
+
+        # Test 3: Perm with avg Wasserstein on margins
+        def avg_wass(u, v):
+            return np.mean(
+                [stats.wasserstein_distance(u[:, i], v[:, i]) for i in range(d)]
+            )
+
+        results["avg_wass_perm"] = self._perm_test(
+            Y_orig, Y_sim, avg_wass, n_perm
+        )
+        # Test 4: Min p-value from marginal KS tests
+        ps_ks = [
+            stats.ks_2samp(Y_orig[:, i], Y_sim[:, i]).pvalue for i in range(d)
+        ]
+        results["min_marginal_ks_p"] = min(ps_ks)
+        # Test 5: Min p-value from marginal Anderson-Darling tests
+        ps_ad = [
+            stats.anderson_ksamp([Y_orig[:, i], Y_sim[:, i]]).significance_level
+            for i in range(d)
+        ]
+        results["min_marginal_ad_p"] = min(ps_ad)
+        # Test 6: Min p-value from marginal Cramer-von Mises tests
+        ps_cvm = [
+            stats.cramervonmises_2samp(Y_orig[:, i], Y_sim[:, i]).pvalue
+            for i in range(d)
+        ]
+        results["min_marginal_cvm_p"] = min(ps_cvm)
+        # Correlation test: Compare all pairwise correlations
+        corr_results = {}
+        pairs = [(i, j) for i in range(d) for j in range(i + 1, d)]
+        for i, j in pairs:
+            r_orig = stats.pearsonr(Y_orig[:, i], Y_orig[:, j])[0]
+            r_sim = stats.pearsonr(Y_sim[:, i], Y_sim[:, j])[0]
+            z, p = self._fisher_z_test(r_orig, r_sim, len(Y_orig), len(Y_sim))
+            corr_results[f"corr_dim{i+1}_dim{j+1}"] = (r_orig, r_sim, z, p)
+        results["corr_tests"] = corr_results
+        return results
+
+    def compare_distributions(self, Y_orig, Y_sim, save_prefix=""):
+        """
+        Visual comparison of original and synthetic distributions.
+
+        Parameters:
+        -----------
+        Y_orig : array-like
+            Original data
+        Y_sim : array-like
+            Synthetic data
+        save_prefix : str, default=''
+            Prefix for saving plots
+        """
+        if Y_orig.ndim == 1:
+            Y_orig = Y_orig.reshape(-1, 1)
+        if Y_sim.ndim == 1:
+            Y_sim = Y_sim.reshape(-1, 1)
+
+        n, d = Y_orig.shape
+
+        # Create a figure with subplots for statistical tests
+        fig, axes = plt.subplots(2, d, figsize=(6 * d, 10))
+        if d == 1:
+            axes = axes.reshape(2, 1)
+
+        # Statistical test results storage
+        ks_results = []
+        ad_results = []
+
+        for i in range(d):
+            # Top row: Histograms with statistical test annotations
+            ax_hist = axes[0, i]
+
+            # Plot histograms
+            ax_hist.hist(
+                Y_orig[:, i],
+                alpha=0.5,
+                label="Original",
+                density=True,
+                bins=20,
+                color="blue",
+            )
+            ax_hist.hist(
+                Y_sim[:, i],
+                alpha=0.5,
+                label="Simulated",
+                density=True,
+                bins=20,
+                color="red",
+            )
+
+            # Perform statistical tests
+            # Kolmogorov-Smirnov test
+            ks_stat, ks_pvalue = stats.ks_2samp(Y_orig[:, i], Y_sim[:, i])
+            ks_results.append((ks_stat, ks_pvalue))
+
+            # Anderson-Darling test
+            ad_result = stats.anderson_ksamp([Y_orig[:, i], Y_sim[:, i]])
+            ad_stat = ad_result.statistic
+            ad_critical = ad_result.critical_values
+            ad_significance = ad_result.significance_level
+            ad_results.append((ad_stat, ad_significance))
+
+            # Add test results to histogram plot
+            textstr = "\n".join(
+                (
+                    f"KS test: p = {ks_pvalue:.4f}",
+                    f"AD test: p < {ad_significance:.3f}",
+                    f"AD stat: {ad_stat:.4f}",
+                )
+            )
+            props = dict(boxstyle="round", facecolor="wheat", alpha=0.8)
+            ax_hist.text(
+                0.05,
+                0.95,
+                textstr,
+                transform=ax_hist.transAxes,
+                fontsize=10,
+                verticalalignment="top",
+                bbox=props,
+            )
+
+            ax_hist.legend()
+            ax_hist.set_title(
+                f"Dimension {i+1} - Histograms with Statistical Tests"
+            )
+            ax_hist.set_xlabel("Value")
+            ax_hist.set_ylabel("Density")
+
+            # Bottom row: ECDFs with KS test visualization
+            ax_ecdf = axes[1, i]
+
+            # Compute ECDFs
+            sorted_orig = np.sort(Y_orig[:, i])
+            ecdf_orig = np.arange(1, len(sorted_orig) + 1) / len(sorted_orig)
+            sorted_sim = np.sort(Y_sim[:, i])
+            ecdf_sim = np.arange(1, len(sorted_sim) + 1) / len(sorted_sim)
+
+            # Plot ECDFs
+            ax_ecdf.step(
+                sorted_orig,
+                ecdf_orig,
+                label="Original",
+                color="blue",
+                linewidth=2,
+            )
+            ax_ecdf.step(
+                sorted_sim,
+                ecdf_sim,
+                label="Simulated",
+                color="red",
+                linewidth=2,
+            )
+
+            # Find the point of maximum difference for KS test
+            # Combine and sort all values
+            all_values = np.sort(np.concatenate([sorted_orig, sorted_sim]))
+            # Compute ECDFs at all points
+            ecdf_orig_all = np.searchsorted(
+                sorted_orig, all_values, side="right"
+            ) / len(sorted_orig)
+            ecdf_sim_all = np.searchsorted(
+                sorted_sim, all_values, side="right"
+            ) / len(sorted_sim)
+            # Find maximum difference
+            diff = np.abs(ecdf_orig_all - ecdf_sim_all)
+            max_idx = np.argmax(diff)
+            max_x = all_values[max_idx]
+            max_y1 = ecdf_orig_all[max_idx]
+            max_y2 = ecdf_sim_all[max_idx]
+
+            # Mark the maximum difference point
+            ax_ecdf.plot(
+                [max_x, max_x],
+                [max_y1, max_y2],
+                "k-",
+                linewidth=3,
+                label=f"KS stat: {ks_stat:.4f}",
+            )
+            ax_ecdf.plot(max_x, max_y1, "ko", markersize=8)
+            ax_ecdf.plot(max_x, max_y2, "ko", markersize=8)
+
+            ax_ecdf.legend()
+            ax_ecdf.set_title(f"Dimension {i+1} - ECDFs with KS Statistic")
+            ax_ecdf.set_xlabel("Value")
+            ax_ecdf.set_ylabel("ECDF")
+
+        plt.tight_layout()
+        if save_prefix:
+            plt.savefig(
+                f"{save_prefix}_statistical_comparison.png",
+                dpi=300,
+                bbox_inches="tight",
+            )
+        plt.show()
+
+        # Print comprehensive test results
+        print("\n" + "=" * 60)
+        print("COMPREHENSIVE STATISTICAL TEST RESULTS")
+        print("=" * 60)
+
+        for i in range(d):
+            ks_stat, ks_pvalue = ks_results[i]
+            ad_stat, ad_significance = ad_results[i]
+
+            print(f"\nDimension {i+1}:")
+            print(f"  Kolmogorov-Smirnov Test:")
+            print(f"    Statistic: {ks_stat:.6f}")
+            print(f"    p-value: {ks_pvalue:.6f}")
+            print(
+                f"    Significance: {'Not Significant' if ks_pvalue > 0.05 else 'SIGNIFICANT'}"
+            )
+
+            print(f"  Anderson-Darling Test:")
+            print(f"    Statistic: {ad_stat:.6f}")
+            print(f"    Significance level: {ad_significance:.3f}")
+            print(
+                f"    Interpretation: {'Distributions differ' if ad_stat > ad_result.critical_values[2] else 'Distributions similar'}"
+            )
+
+        # Create summary plot for all dimensions
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+
+        # KS test p-values across dimensions
+        ks_pvalues = [result[1] for result in ks_results]
+        dimensions = list(range(1, d + 1))
+
+        bars = ax1.bar(
+            dimensions,
+            ks_pvalues,
+            color=["red" if p < 0.05 else "green" for p in ks_pvalues],
+        )
+        ax1.axhline(
+            y=0.05, color="black", linestyle="--", alpha=0.7, label="α = 0.05"
+        )
+        ax1.set_xlabel("Dimension")
+        ax1.set_ylabel("KS Test p-value")
+        ax1.set_title("Kolmogorov-Smirnov Test Results\nby Dimension")
+        ax1.set_xticks(dimensions)
+        ax1.legend()
+
+        # Add value labels on bars
+        for bar, pvalue in zip(bars, ks_pvalues):
+            height = bar.get_height()
+            ax1.text(
+                bar.get_x() + bar.get_width() / 2.0,
+                height,
+                f"{pvalue:.3f}",
+                ha="center",
+                va="bottom",
+            )
+
+        # AD test statistics across dimensions
+        ad_stats = [result[0] for result in ad_results]
+
+        bars = ax2.bar(dimensions, ad_stats, color="skyblue")
+        ax2.set_xlabel("Dimension")
+        ax2.set_ylabel("AD Test Statistic")
+        ax2.set_title("Anderson-Darling Test Statistics\nby Dimension")
+        ax2.set_xticks(dimensions)
+
+        # Add value labels on bars
+        for bar, stat in zip(bars, ad_stats):
+            height = bar.get_height()
+            ax2.text(
+                bar.get_x() + bar.get_width() / 2.0,
+                height,
+                f"{stat:.3f}",
+                ha="center",
+                va="bottom",
+            )
+
+        plt.tight_layout()
+        if save_prefix:
+            plt.savefig(
+                f"{save_prefix}_test_summary.png", dpi=300, bbox_inches="tight"
+            )
+        plt.show()
+
+        # Additional: Q-Q plots for each dimension
+        fig, axes = plt.subplots(1, d, figsize=(5 * d, 5))
+        if d == 1:
+            axes = [axes]
+
+        for i in range(d):
+            # Sort data for Q-Q plot
+            orig_sorted = np.sort(Y_orig[:, i])
+            sim_sorted = np.sort(Y_sim[:, i])
+
+            # Generate theoretical quantiles
+            n_orig = len(orig_sorted)
+            n_sim = len(sim_sorted)
+
+            # Use smaller set for quantiles to avoid interpolation issues
+            n_points = min(n_orig, n_sim, 1000)
+            quantiles = np.linspace(0, 1, n_points)
+
+            orig_quantiles = np.quantile(orig_sorted, quantiles)
+            sim_quantiles = np.quantile(sim_sorted, quantiles)
+
+            axes[i].plot(
+                orig_quantiles, sim_quantiles, "o", alpha=0.6, markersize=3
+            )
+            min_val = min(orig_quantiles.min(), sim_quantiles.min())
+            max_val = max(orig_quantiles.max(), sim_quantiles.max())
+            axes[i].plot(
+                [min_val, max_val],
+                [min_val, max_val],
+                "r--",
+                alpha=0.8,
+                linewidth=2,
+            )
+            axes[i].set_xlabel("Original Data Quantiles")
+            axes[i].set_ylabel("Simulated Data Quantiles")
+            axes[i].set_title(f"Dimension {i+1} - Q-Q Plot")
+
+            # Add correlation coefficient
+            corr = np.corrcoef(orig_quantiles, sim_quantiles)[0, 1]
+            axes[i].text(
+                0.05,
+                0.95,
+                f"Corr: {corr:.4f}",
+                transform=axes[i].transAxes,
+                bbox=dict(
+                    boxstyle="round,pad=0.3", facecolor="white", alpha=0.8
+                ),
+                verticalalignment="top",
+            )
+
+        plt.tight_layout()
+        if save_prefix:
+            plt.savefig(
+                f"{save_prefix}_qq_plots.png", dpi=300, bbox_inches="tight"
+            )
+        plt.show()
+
+        return {
+            "ks_results": ks_results,
+            "ad_results": ad_results,
+            "dimensions": d,
+        }
+
+
+# ============================================================================
+# EXAMPLE: Testing reproducibility with different seeds
+# ============================================================================
+
+if __name__ == "__main__":
+    print("=" * 70)
+    print("TESTING REPRODUCIBILITY WITH DIFFERENT RANDOM SEEDS")
+    print("=" * 70)
+
+    # Generate synthetic multivariate data
+    np.random.seed(42)
+    n_samples = 200
+    X_true = np.random.randn(n_samples, 2)
+    Y_true = np.column_stack(
+        [
+            X_true[:, 0]
+            + 0.5 * X_true[:, 1]
+            + np.random.randn(n_samples) * 0.1,
+            X_true[:, 1] ** 2 + np.random.randn(n_samples) * 0.1,
+        ]
+    )
+
+    print(f"\nOriginal data shape: {Y_true.shape}")
+    print(f"Original data mean: {Y_true.mean(axis=0)}")
+    print(f"Original data std: {Y_true.std(axis=0)}")
+
+    # Test 1: Same seed should give identical results
+    print("\n" + "-" * 70)
+    print("TEST 1: Same seed (42) - Should produce identical results")
+    print("-" * 70)
+
+    sim1 = DistroSimulator(random_state=42, use_rff=False, n_clusters=3)
+    sim1.fit(Y_true, n_trials=10)
+    samples1_a = sim1.sample(100)
+
+    sim2 = DistroSimulator(random_state=42, use_rff=False, n_clusters=3)
+    sim2.fit(Y_true, n_trials=10)
+    samples1_b = sim2.sample(100)
+
+    print(f"\nRun 1 - Best params: {sim1.best_params_}")
+    print(f"Run 2 - Best params: {sim2.best_params_}")
+    print(
+        f"\nAre best params identical? {sim1.best_params_ == sim2.best_params_}"
+    )
+    print(f"Are samples identical? {np.allclose(samples1_a, samples1_b)}")
+    print(
+        f"Max difference in samples: {np.max(np.abs(samples1_a - samples1_b)):.10f}"
+    )
+
+    # Test 2: Different seeds should give different results
+    print("\n" + "-" * 70)
+    print(
+        "TEST 2: Different seeds (42 vs 123) - Should produce different results"
+    )
+    print("-" * 70)
+
+    sim3 = DistroSimulator(random_state=42, use_rff=False, n_clusters=3)
+    sim3.fit(Y_true, n_trials=10)
+    samples2_a = sim3.sample(100)
+
+    sim4 = DistroSimulator(random_state=123, use_rff=False, n_clusters=3)
+    sim4.fit(Y_true, n_trials=10)
+    samples2_b = sim4.sample(100)
+
+    print(f"\nSeed 42 - Best params: {sim3.best_params_}")
+    print(f"Seed 123 - Best params: {sim4.best_params_}")
+    print(
+        f"\nAre best params identical? {sim3.best_params_ == sim4.best_params_}"
+    )
+    print(f"Are samples identical? {np.allclose(samples2_a, samples2_b)}")
+    print(
+        f"Max difference in samples: {np.max(np.abs(samples2_a - samples2_b)):.6f}"
+    )
+
+    # Test 3: Different residual sampling methods with same seed
+    print("\n" + "-" * 70)
+    print("TEST 3: Different sampling methods with same seed (42)")
+    print("-" * 70)
+
+    for method in ["bootstrap", "kde", "gmm"]:
+        sim = DistroSimulator(
+            random_state=42,
+            use_rff=False,
+            residual_sampling=method,
+            n_clusters=3,
+        )
+        sim.fit(Y_true, n_trials=5)
+        samples = sim.sample(100)
+        print(
+            f"\n{method.upper():12s} - Mean: {samples.mean(axis=0)}, "
+            f"Std: {samples.std(axis=0)}"
+        )
+
+    # Test 4: Test reproducibility with RFF
+    print("\n" + "-" * 70)
+    print("TEST 4: RFF approximation with same seed - Should be reproducible")
+    print("-" * 70)
+
+    sim5 = DistroSimulator(
+        random_state=42, use_rff=True, rff_components=50, n_clusters=3
+    )
+    sim5.fit(Y_true, n_trials=10)
+    samples3_a = sim5.sample(100)
+
+    sim6 = DistroSimulator(
+        random_state=42, use_rff=True, rff_components=50, n_clusters=3
+    )
+    sim6.fit(Y_true, n_trials=10)
+    samples3_b = sim6.sample(100)
+
+    print(f"\nRun 1 - Best params: {sim5.best_params_}")
+    print(f"Run 2 - Best params: {sim6.best_params_}")
+    print(
+        f"\nAre best params identical? {sim5.best_params_ == sim6.best_params_}"
+    )
+    print(f"Are samples identical? {np.allclose(samples3_a, samples3_b)}")
+    print(
+        f"Max difference in samples: {np.max(np.abs(samples3_a - samples3_b)):.10f}"
+    )
+
+    print("\n" + "=" * 70)
+    print("ALL TESTS COMPLETED")
+    print("=" * 70)
