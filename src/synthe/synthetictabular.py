@@ -21,6 +21,8 @@ class SyntheticTabularSampler:
     random_state : int, optional
         Seed for the random number generator to ensure reproducibility.
         Defaults to 42.
+    n_samples : int, optional
+        Number of samples to generate. Defaults to 500.
     type : str, optional
         The type of synthetic data to generate.
         Must be one of "classification", "regression", "multioutput_regression",
@@ -36,8 +38,9 @@ class SyntheticTabularSampler:
         The specified type of synthetic data to generate.
     """
 
-    def __init__(self, random_state: int = 42, type: str = "classification"):
+    def __init__(self, random_state: int = 42, n_samples: int = 500, type: str = "classification"):
         self.random_state = random_state
+        self.n_samples = n_samples
         self.rng = np.random.default_rng(random_state)
         self.type = type
 
@@ -59,7 +62,7 @@ class SyntheticTabularSampler:
         )
 
         cfg = dict(
-            n_samples=500,
+            n_samples=self.n_samples,
             n_features=n_features,
             n_informative=n_informative,
             n_redundant=n_redundant,
@@ -76,7 +79,7 @@ class SyntheticTabularSampler:
     # ---- Regression
     def _gen_regression(self):
         cfg = dict(
-            n_samples=500,
+            n_samples=self.n_samples,
             n_features=self.rng.integers(5, 120),
             n_informative=self.rng.integers(2, 40),
             noise=float(self.rng.uniform(0.1, 25)),
@@ -94,7 +97,7 @@ class SyntheticTabularSampler:
     def _gen_multioutput_regression(self):
         n_targets = self.rng.integers(2, 6)
         cfg = dict(
-            n_samples=500,
+            n_samples=self.n_samples,
             n_features=self.rng.integers(5, 60),
             n_informative=self.rng.integers(2, 20),
             noise=float(self.rng.uniform(0.1, 10)),
@@ -114,7 +117,7 @@ class SyntheticTabularSampler:
     # ---- Multi-label classification
     def _gen_multilabel_classification(self):
         cfg = dict(
-            n_samples=500,
+            n_samples=self.n_samples,
             n_features=self.rng.integers(5, 80),
             n_classes=self.rng.integers(3, 10),
             n_labels=self.rng.integers(1, 5),
@@ -128,14 +131,14 @@ class SyntheticTabularSampler:
     # ---- Nonlinear regression (sinusoidal / polynomial)
     def _gen_nonlinear_regression(self):
         n_features = self.rng.integers(3, 10)
-        X = self.rng.normal(size=(500, n_features))
+        X = self.rng.normal(size=(self.n_samples, n_features))
 
         # Nonlinear target
         y = (
             np.sin(X[:, 0] * self.rng.uniform(1, 5))
             + X[:, 1] ** 2 * self.rng.uniform(0.5, 2.0)
             + np.tanh(X[:, 2] * self.rng.uniform(1, 3))
-            + self.rng.normal(0, 0.3, size=500)
+            + self.rng.normal(0, 0.3, size=self.n_samples)
         )
 
         cfg = {"type": "nonlinear_regression", "n_features": n_features}
@@ -146,13 +149,13 @@ class SyntheticTabularSampler:
         base_features = self.rng.integers(3, 8)
         degree = self.rng.integers(2, 4)
 
-        X = self.rng.normal(size=(500, base_features))
+        X = self.rng.normal(size=(self.n_samples, base_features))
         poly = PolynomialFeatures(degree=degree)
         X_poly = poly.fit_transform(X)
 
         # regression target
         coef = self.rng.normal(0, 1, size=X_poly.shape[1])
-        y = X_poly @ coef + self.rng.normal(0, 0.3, 500)
+        y = X_poly @ coef + self.rng.normal(0, 0.3, size=self.n_samples)
 
         cfg = {
             "base_features": base_features,
@@ -164,7 +167,7 @@ class SyntheticTabularSampler:
     # ---- Sparse high-dimensional regression
     def _gen_sparse_regression(self):
         n_features = self.rng.integers(500, 2000)
-        X = self.rng.normal(size=(500, n_features))
+        X = self.rng.normal(size=(self.n_samples, n_features))
 
         # sparse coefficients
         coef = np.zeros(n_features)
@@ -172,7 +175,7 @@ class SyntheticTabularSampler:
         idx = self.rng.choice(n_features, size=k, replace=False)
         coef[idx] = self.rng.normal(0, 5, size=k)
 
-        y = X @ coef + self.rng.normal(0, 0.2, size=500)
+        y = X @ coef + self.rng.normal(0, 0.2, size=self.n_samples)
 
         cfg = {"n_features": n_features, "nonzero": k}
         return X, y, cfg, "sparse_regression"
@@ -180,11 +183,11 @@ class SyntheticTabularSampler:
     # ---- Time-series-like AR regression
     def _gen_ar_regression(self):
         n_features = self.rng.integers(3, 10)
-        X = self.rng.normal(size=(500, n_features))
+        X = self.rng.normal(size=(self.n_samples, n_features))
 
         # AR(3)-like structure for y
-        y = np.zeros(500)
-        for t in range(3, 500):
+        y = np.zeros(self.n_samples)
+        for t in range(3, self.n_samples):
             y[t] = (
                 0.6 * y[t - 1]
                 - 0.2 * y[t - 2]
@@ -201,26 +204,26 @@ class SyntheticTabularSampler:
         n_num = self.rng.integers(3, 10)
         n_cat = self.rng.integers(1, 5)
 
-        X_num = self.rng.normal(size=(500, n_num))
-        X_cat = self.rng.integers(0, 5, size=(500, n_cat))
+        X_num = self.rng.normal(size=(self.n_samples, n_num))
+        X_cat = self.rng.integers(0, 5, size=(self.n_samples, n_cat))
 
         X = np.concatenate([X_num, X_cat], axis=1)
 
         coef = self.rng.normal(0, 1, n_num)
-        y = X_num @ coef + self.rng.normal(0, 1, 500)
+        y = X_num @ coef + self.rng.normal(0, 1, self.n_samples)
 
         cfg = {"numerical": n_num, "categorical": n_cat}
         return X, y, cfg, "mixed_regression"
 
     # ---- Simple causal DAG-like dataset
     def _gen_causal_style(self):
-        X1 = self.rng.normal(size=500)
-        X2 = 2 * X1 + self.rng.normal(0, 0.2, 500)
-        X3 = -0.7 * X1 + self.rng.normal(0, 0.2, 500)
-        X4 = 1.5 * X2 + X3 + self.rng.normal(0, 0.2, 500)
+        X1 = self.rng.normal(size=self.n_samples)
+        X2 = 2 * X1 + self.rng.normal(0, 0.2, self.n_samples)
+        X3 = -0.7 * X1 + self.rng.normal(0, 0.2, self.n_samples)
+        X4 = 1.5 * X2 + X3 + self.rng.normal(0, 0.2, self.n_samples)
         X = np.column_stack([X1, X2, X3, X4])
 
-        y = 3 * X4 + self.rng.normal(0, 1, 500)
+        y = 3 * X4 + self.rng.normal(0, 1, self.n_samples)
 
         cfg = {"DAG": "X1→X2/X3→X4→y"}
         return X, y, cfg, "causal_regression"
