@@ -38,7 +38,12 @@ class SyntheticTabularSampler:
         The specified type of synthetic data to generate.
     """
 
-    def __init__(self, random_state: int = 42, n_samples: int = 500, type: str = "classification"):
+    def __init__(
+        self,
+        random_state: int = 42,
+        n_samples: int = 500,
+        type: str = "classification",
+    ):
         self.random_state = random_state
         self.n_samples = n_samples
         self.rng = np.random.default_rng(random_state)

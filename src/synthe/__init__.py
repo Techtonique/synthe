@@ -15,6 +15,7 @@ from .meboot import MaximumEntropyBootstrap
 from .ts_distro_simulator import TsDistroSimulator  # noqa: F401
 from .diversity_generator import DiversityGenerator  # noqa: F401
 from .synthetictabular import SyntheticTabularSampler
+from .pcarvflsimulator import PCARVFLSimulator, adequacy_report
 
 __all__ = [
     "AdaptiveHistogramSampler",
@@ -29,4 +30,6 @@ __all__ = [
     "TsDistroSimulator",
     "DiversityGenerator",
     "SyntheticTabularSampler",
+    "PCARVFLSimulator",
+    "adequacy_report",
 ]
